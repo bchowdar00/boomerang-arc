@@ -1,0 +1,127 @@
+// The frame around every page: the name, the links, the wallet button, the notice when the chain
+// cannot be read, and the words on the buttons that send something. As with the other views, the
+// components only lay this out.
+import type { Address } from "../../../packages/kit/src/index.ts";
+import { hrefFor, type Route } from "../app/route.ts";
+import { short } from "../data/keeper.ts";
+
+export type Shell = {
+  brand: string;
+  tagline: string;
+  /** Shown beside the name on every page: which network, and that the money is test money. */
+  network: string;
+  nav: { href: string; label: string; current: boolean }[];
+  wallet: {
+    state: "none" | "connect" | "wrong-network" | "ready";
+    /** The account, shortened; null until one is connected. */
+    account: string | null;
+    button: string | null;
+    note: string | null;
+  };
+  /** Set when the chain cannot be read; the page below it is then old, or empty. */
+  banner: string | null;
+  asOf: string | null;
+};
+
+const NAV: { route: Route; label: string; pages: Route["page"][] }[] = [
+  { route: { page: "home" }, label: "Campaigns", pages: ["home", "campaign", "pledge"] },
+  { route: { page: "mine" }, label: "My money", pages: ["mine"] },
+  { route: { page: "proof" }, label: "Proof", pages: ["proof"] },
+];
+
+export function shell(o: {
+  route: Route;
+  chain: { id: number; name: string; local: boolean };
+  /** How many wallets this browser has; the account connected, if any; the chain that wallet is on, if known. */
+  wallets: number;
+  account: Address | null;
+  walletChainId: number | null;
+  /** The block of the last good read, or null if there has been none; whether the latest attempt failed. */
+  block: bigint | null;
+  readFailed: boolean;
+}): Shell {
+  const wallet: Shell["wallet"] =
+    o.account === null
+      ? o.wallets === 0
+        ? { state: "none", account: null, button: null, note: "No wallet found in this browser. You can read everything here without one; to pledge you need a wallet with test USDC on Arc Testnet." }
+        : { state: "connect", account: null, button: "Connect a wallet", note: null }
+      : o.walletChainId !== null && o.walletChainId !== o.chain.id
+        ? { state: "wrong-network", account: short(o.account), button: `Switch to ${o.chain.name}`, note: `Your wallet is on another network. Nothing is sent until it is on ${o.chain.name}.` }
+        : { state: "ready", account: short(o.account), button: null, note: null };
+
+  const banner = !o.readFailed
+    ? null
+    : o.block === null
+      ? "The chain cannot be read right now, so there is nothing to show yet. This page keeps trying."
+      : `The chain could not be read just now. What you see is from block ${o.block} and may be out of date; nothing can be sent until it reads again.`;
+
+  return {
+    brand: "Boomerang",
+    tagline: "Pledge to a goal. If it is missed, your money comes back, with a bonus for backing early.",
+    network: o.chain.local ? `${o.chain.name}, a test chain on this machine` : `${o.chain.name}. Test USDC only: no real money is involved.`,
+    nav: NAV.map((n) => ({ href: hrefFor(n.route), label: n.label, current: n.pages.includes(o.route.page) })),
+    wallet,
+    banner,
+    asOf: o.block === null ? null : `As of block ${o.block}`,
+  };
+}
+
+/** The demo desk's offer of test USDC, shown where a visitor is short of it. Null when there is no desk or no account. */
+export function deskOffer(o: { desk: Address | null; account: Address | null }): { button: string; note: string } | null {
+  if (o.desk === null || o.account === null) return null;
+  return { button: "Get 2.00 test USDC", note: "From this site's demo desk, once per address. Circle's faucet for Arc Testnet gives more." };
+}
+
+/** One step of a send, as the visitor reads it while their wallet is asking or the chain is working. */
+export function stepLine(step: { index: number; label: string; state: "asking" | "sent" | "done" }, total: number): string {
+  const n = total > 1 ? `Step ${step.index + 1} of ${total}: ` : "";
+  const what = step.label;
+  return step.state === "asking" ? `${n}${what}. Confirm it in your wallet.` : step.state === "sent" ? `${n}${what}. Sent; waiting for the chain.` : `${n}${what}. Done.`;
+}
+
+/** The fixed words on the pages: headings, labels and short notes that depend on nothing. */
+export const WORDS = {
+  loading: "Reading the chain…",
+  connect: "Connect a wallet",
+  home: { running: "Open and upcoming", settled: "Settled", totals: "So far, on this contract", example: "Example" },
+  campaign: {
+    back: "All campaigns",
+    terms: "The terms, as the contract holds them",
+    feed: "What has happened",
+    siteWords: "The name and description above are this site's words. Every amount, date and address on this page is read from the contract.",
+    chainWords: "This campaign has no name on this site. Everything shown is read from the contract.",
+    example: "An example campaign: the people named are invented, and the money is test money.",
+    demo: "A demo campaign: the money is test money.",
+    deskWords: "This site's demo desk opened this campaign, and the name above is this site's. Every amount, date and address on this page is read from the contract.",
+    pledge: "Pledge to this campaign",
+  },
+  pledge: {
+    title: "Your pledge",
+    amount: "Amount in USDC",
+    back: "Back to the campaign",
+    fromContract: "This is the contract's own answer for this amount, read just now.",
+    estimate: "This is worked out by this page from the contract's rules. The contract is being asked.",
+    sent: "Your pledge is in. It shows on the campaign page and under My money.",
+    oneSignature: "One signature in your wallet, no gas: the keeper sends it for you.",
+    signing: "Sign the pledge in your wallet. It is a signature, not a transaction, and costs no gas.",
+    relaying: "Signed. The keeper is sending your pledge.",
+    waiting: "Sent; waiting for the chain.",
+    landed: "Your signed pledge went through after all. Nothing more was sent.",
+    unconfirmed: "The keeper sent your pledge, but the chain has not confirmed it yet. Check My money in a moment before pledging again.",
+    cannotSign: "Your wallet could not make this kind of signature.",
+    cannotCheck: "The chain could not be read just now, so nothing was sent. Try again in a moment.",
+  },
+  mine: { title: "My money", totals: "In total" },
+  proof: {
+    title: "Proof",
+    custody: "What the contract holds and owes",
+    second: "A second ledger, built from the events alone",
+    stream: "The Stream and the keeper",
+    errors: "What the keeper reported going wrong",
+    facts: "The contracts",
+    yourself: "Check it yourself",
+    limits: "What this app does not claim",
+  },
+  wallets: { choose: "Choose a wallet", cancel: "Cancel" },
+  explorer: "View on the explorer",
+} as const;

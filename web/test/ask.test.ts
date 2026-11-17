@@ -1,0 +1,90 @@
+// Every address and answer in these tests is invented. No request leaves the machine: fetch is a stand-in.
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import { askForCampaign, askForUsdc, askKeeper, type Fetch } from "../src/data/ask.ts";
+
+const ME = "0x00000000000000000000000000000000000000a1";
+const URL_ = "https://keeper.example";
+const HEALTH = {
+  lastSeq: "0", missing: null, pending: 0, repeats: 0, lastBlock: 0, lastTime: "0", lastDeliveryAt: null, lastBeatBlock: null,
+  kvError: null, deliveries: 0, sent: 0, failedSends: 0, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
+};
+const LEDGER = { lastSeq: "0", totalOwed: "0", missing: null, campaigns: [], feed: [] };
+
+type Seen = { url: string; init: Parameters<Fetch>[1] };
+const fake = (answers: Record<string, { status?: number; body?: unknown; fail?: boolean }>): { fetch: Fetch; seen: Seen[] } => {
+  const seen: Seen[] = [];
+  return {
+    seen,
+    fetch: async (url, init) => {
+      seen.push({ url, init });
+      const a = answers[url.replace(URL_, "")] ?? { status: 404, body: {} };
+      if (a.fail) throw new Error("network down");
+      return {
+        status: a.status ?? 200,
+        json: async () => {
+          if (a.body === "not json") throw new SyntaxError("Unexpected token");
+          return a.body;
+        },
+      };
+    },
+  };
+};
+
+describe("asking the keeper", function () {
+  it("ask.up: a keeper that answers both questions well is read; the requests carry no credentials and follow no redirect", async function () {
+    const f = fake({ "/ledger": { body: LEDGER }, "/health": { body: HEALTH } });
+    const a = await askKeeper({ url: URL_, fetch: f.fetch });
+    assert.equal(a.up, true);
+    assert.equal(a.up && a.ledger.lastSeq, 0n);
+    assert.equal(a.up && a.health.settled, true);
+    assert.deepEqual(f.seen.map((s) => s.url).sort(), [`${URL_}/health`, `${URL_}/ledger`]);
+    for (const s of f.seen) {
+      assert.deepEqual([s.init.method, s.init.redirect, s.init.credentials, s.init.cache], ["GET", "error", "omit", "no-store"]);
+      assert.ok(s.init.signal instanceof AbortSignal);
+    }
+  });
+
+  it("ask.down: no keeper, a silent one, an error answer and nonsense each come back as a reason, never thrown", async function () {
+    assert.deepEqual(await askKeeper({ url: null, fetch: fake({}).fetch }), { up: false, why: "none" });
+    assert.deepEqual(await askKeeper({ url: URL_, fetch: fake({ "/ledger": { fail: true }, "/health": { body: HEALTH } }).fetch }), { up: false, why: "unreachable" });
+    assert.deepEqual(await askKeeper({ url: URL_, fetch: fake({ "/ledger": { status: 502, body: {} }, "/health": { body: HEALTH } }).fetch }), { up: false, why: "unreachable" });
+    assert.deepEqual(await askKeeper({ url: URL_, fetch: fake({ "/ledger": { body: "not json" }, "/health": { body: HEALTH } }).fetch }), { up: false, why: "unreachable" });
+    assert.deepEqual(await askKeeper({ url: URL_, fetch: fake({ "/ledger": { body: { ...LEDGER, totalOwed: 5 } }, "/health": { body: HEALTH } }).fetch }), { up: false, why: "unreadable" });
+    assert.deepEqual(await askKeeper({ url: URL_, fetch: fake({ "/ledger": { body: LEDGER }, "/health": { body: { ...HEALTH, settled: "yes" } } }).fetch }), { up: false, why: "unreadable" });
+  });
+
+  it("ask.desk: each answer from the desk is said in a sentence, and an answer the page does not know is not passed on", async function () {
+    const usdc = async (body: unknown, status = 200) => askForUsdc({ url: URL_, fetch: fake({ "/demo/usdc": { status, body } }).fetch, address: ME });
+    assert.deepEqual(await usdc({ ok: true, hash: "0xfeed" }), { ok: true, line: "The desk sent 2.00 test USDC to your address." });
+    assert.deepEqual(await usdc({ ok: false, reason: "already-given" }, 409), { ok: false, line: "This address has already had its test USDC from the desk." });
+    assert.match((await usdc({ ok: false, reason: "desk-low" }, 409)).line, /out of test USDC/);
+    assert.match((await usdc({ ok: false, reason: "unconfirmed" }, 409)).line, /will not send to this address again/);
+    assert.match((await usdc({ ok: false, reason: "busy" }, 409)).line, /busy/);
+    assert.match((await usdc({ ok: false, reason: "no-desk" }, 503)).line, /not running a demo desk/);
+    // The keeper's own words (a reason this page has no sentence for, a detail field) never reach the page.
+    assert.deepEqual(await usdc({ ok: false, reason: "<b>pwned</b>", detail: "<script>" }, 409), { ok: false, line: "The desk could not do that just now." });
+    // A reason that names an inherited Object property is not a known refusal: it falls back, never returns a function or object.
+    for (const reason of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+      assert.deepEqual(await usdc({ ok: false, reason }, 409), { ok: false, line: "The desk could not do that just now." }, reason);
+    }
+    for (const odd of [null, "ok", 5, { ok: "true" }, [], "not json"]) assert.deepEqual(await usdc(odd), { ok: false, line: "The desk could not be reached." }, String(odd));
+    assert.deepEqual(await askForUsdc({ url: null, fetch: fake({}).fetch, address: ME }), { ok: false, line: "The desk could not be reached." });
+    assert.deepEqual(await askForUsdc({ url: URL_, fetch: fake({ "/demo/usdc": { fail: true } }).fetch, address: ME }), { ok: false, line: "The desk could not be reached." });
+
+    // The request itself: a POST of the address as JSON, nothing else.
+    const f = fake({ "/demo/usdc": { body: { ok: true } } });
+    await askForUsdc({ url: URL_, fetch: f.fetch, address: ME });
+    assert.equal(f.seen[0].url, `${URL_}/demo/usdc`);
+    assert.deepEqual([f.seen[0].init.method, f.seen[0].init.body, f.seen[0].init.credentials, f.seen[0].init.redirect], ["POST", JSON.stringify({ address: ME }), "omit", "error"]);
+
+    const campaign = async (body: unknown) => askForCampaign({ url: URL_, fetch: fake({ "/demo/campaign": { body } }).fetch });
+    assert.deepEqual(await campaign({ ok: true, id: "7" }), { ok: true, line: "A demo campaign is open. It takes pledges in about a minute and settles in about eleven.", id: 7n });
+    assert.equal((await campaign({ ok: true, id: "7; drop" })).id, null);
+    assert.equal((await campaign({ ok: true })).id, null);
+    const open = await campaign({ ok: false, reason: "campaign-open" });
+    assert.deepEqual([open.ok, open.id], [false, null]);
+    assert.match(open.line, /already running/);
+  });
+});
