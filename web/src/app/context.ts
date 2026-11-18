@@ -40,6 +40,11 @@ export type Ctx = {
   signedGuard(id: bigint): Promise<SignedGuard>;
   sendState(key: string): SendState | null;
   connect(): void;
+  /** Whether this browser has any wallet at all; without one `connect` has nothing to open. */
+  hasWallet: boolean;
+  /** A campaign the desk has just opened and the next read has not shown yet. */
+  expected(id: bigint): boolean;
+  expect(id: bigint): void;
   /** Ask the contract what a pledge of `amount` to campaign `id` would do, now. */
   quote(id: bigint, amount: bigint): Promise<Answer>;
   askForUsdc(): Promise<DeskAnswer>;

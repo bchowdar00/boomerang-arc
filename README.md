@@ -2,13 +2,13 @@
 
 A crowdfund where backing early is safe.
 
-A sponsor locks two pots before a campaign opens: a **match**, paid to the recipient only if the target is met, and a **bonus**, paid to early backers only if it is missed. Hit the target and the recipient gets the pledges plus the match. Miss it and every backer gets everything back, with the early backers splitting the bonus. Nobody can withdraw early, and nobody controls the contract.
+A sponsor locks two pots before a campaign opens: a **match**, paid to the recipient only if the target is met, and a **bonus**, paid to early backers only if it is missed. Hit the target and the recipient gets the pledges plus the match. Miss it and every backer gets everything back, with the early backers splitting the bonus. Nobody can withdraw early, and nobody controls the contract. (A campaign's terms can have the recipient lock the bonus pot in place of the sponsor; whatever of it is not paid out then goes back to the recipient.)
 
 It is built for a campus club or a community with a sponsor behind it: the sponsor's money does two jobs, and only one of them is ever paid.
 
-**Status:** in progress (UBC 2026 hackathon week). The contracts, the Stream filter, the keeper and the shared library are written and tested on a local chain. The contracts are deployed on Arc Testnet (block 72640266, 2026-11-17 UTC) and pass all six live checks (`node scripts/check-live.mjs`); the page is live at https://boomerang-arc.vercel.app, the Stream delivers to the keeper on Azure, and the Proof page shows both.
-**Last reconciled:** 2026-11-16.
-**Known gaps:** no deployment; no signed pledge has been sent on Arc, and how common wallets show its typed data is not checked; the cross-chain router has only run against a stand-in for Circle's contracts written from Circle's published source; the Stream filter has only run against QuickNode's documented payload shape, not one recorded from Arc; the page runs against a local chain only; no real campaign has run.
+**Status:** live on Arc Testnet (UBC 2026 hackathon week). The contracts were deployed on 2026-11-17 UTC (block 72640266), their sources are verified on Arc's explorer, and they pass all six live checks (`npm run verify`). The page is at https://boomerang-arc.vercel.app; a QuickNode Stream delivers to the keeper on Azure, and the Proof page shows both. Five campaigns have run on Arc, with eight one-signature pledges relayed by the keeper.
+**Last reconciled:** 2026-11-18.
+**Known gaps:** how common wallets show the signed pledge's typed data is not checked (the pledges on Arc were signed by scripts); the cross-chain router is deployed but has only run against a stand-in for Circle's contracts written from Circle's published source, and the page has no form for a pledge from another chain; the page opens campaigns only through its desk, on fixed ten-minute terms; no real campaign has run, and all money is test USDC.
 
 ## Where this came from
 
@@ -63,7 +63,7 @@ How the parts fit, and what still works when each one stops: **[docs/ARCHITECTUR
 
 ## QuickNode Streams
 
-The contract does nothing by itself at a deadline: someone has to call `finalize` and the payouts. A QuickNode Stream is what makes that happen on time. No server here polls the chain or runs a timer; the Stream is the only clock and the only source of chain data the keeper has.
+The contract does nothing by itself at a deadline: someone has to call `finalize` and the payouts. A QuickNode Stream is what makes that happen on time. No server here polls the chain or runs a timer; the Stream is the only clock the keeper has and the only thing that tells it something happened. (Before it sends a call, the keeper asks the contract whether that call would change anything, so a false delivery costs no gas.)
 
 | | |
 |---|---|
@@ -117,10 +117,12 @@ cd contracts && npx hardhat run ../scripts/deploy.ts --network arcTestnet
 ```
 
 ```bash
-node scripts/check-live.mjs
+npm run verify
 ```
 
-`check-live.mjs` holds no key and sends nothing. It exits 0 when every check passes, 1 when one fails, and 2 when it could not check (it says what is missing). The token it holds the contract to, Circle's USDC on Arc Testnet, is written in the script and not read from the addresses file. It checks five things: the deployed code is this repository's and was built with Circle's USDC address; the transaction that created the contract carried this repository's creation code and that address and nothing else, so the contract began with no state of anyone's making; the ABI has no owner functions and the deployed code has no `DELEGATECALL`, `CALLCODE` or `SELFDESTRUCT`; the contract holds at least what it owes at one block; and a ledger rebuilt from the events equals the contract's own state.
+`npm run verify` builds the contracts (the compiled code the check compares against) and then runs `node scripts/check-live.mjs`. On a fresh copy that is all it takes: `git clone`, `npm ci`, `npm run verify`.
+
+`check-live.mjs` holds no key and sends nothing. It exits 0 when every check passes, 1 when one fails, and 2 when it could not check (it says what is missing). The token it holds the contract to, Circle's USDC on Arc Testnet, is written in the script and not read from the addresses file. It checks six things: the deployed code is this repository's and was built with Circle's USDC address; the transaction that created the contract carried this repository's creation code and that address and nothing else, so the contract began with no state of anyone's making; the ABI has no owner functions and the deployed code has no `DELEGATECALL`, `CALLCODE` or `SELFDESTRUCT`; the contract holds at least what it owes at one block; a ledger rebuilt from the events equals the contract's own state; and the one-signature helper runs this repository's code, bound to that token and this contract.
 
 ## What is defended, and what is not
 

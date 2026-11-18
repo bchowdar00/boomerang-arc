@@ -1,8 +1,8 @@
 # Architecture
 
-**Status:** describes the code in this repository as tested on a local chain. Nothing is deployed yet, so no address or live measurement appears here.
-**Last reconciled:** 2026-11-16.
-**Known gaps:** the router has only run against a stand-in for Circle's contracts, written from Circle's published source; the Stream filter has only run against QuickNode's documented payload shape; the web app runs against a local chain only; the one-signature pledge has run only against TestUSDC, which signs on the same EIP-712 domain as Arc Testnet's USDC.
+**Status:** describes the code in this repository. It has been deployed on Arc Testnet since 2026-11-17; the addresses are in `packages/kit/addresses.json` and the README, and no live measurement appears here.
+**Last reconciled:** 2026-11-18.
+**Known gaps:** the router has only run against a stand-in for Circle's contracts, written from Circle's published source; the one-signature pledges on Arc were signed by scripts, so how common wallets show its typed data is not checked; no pledge from another chain has run on Arc.
 
 ## The parts
 

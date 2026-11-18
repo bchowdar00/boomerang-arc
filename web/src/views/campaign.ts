@@ -2,6 +2,7 @@
 // contract. The page component only lays this out. Nothing here reads the chain or the clock;
 // `now` is the time of the block the figures were read at.
 import type { Address } from "../../../packages/kit/src/index.ts";
+import { Outcome } from "../../../packages/kit/src/index.ts";
 import { hrefFor } from "../app/route.ts";
 import { clockLine, endsAs, phaseOf, progressOf, type Phase } from "../data/campaign.ts";
 import { short } from "../data/keeper.ts";
@@ -33,9 +34,43 @@ export type CampaignPage = {
   pledgeWhy: string | null;
   /** Set when the deadline has passed and nobody has settled it yet: anyone may. */
   settle: { button: string; note: string } | null;
+  /** What a settled campaign still owes its recipient or the funders of its pots, by the contract's own flags. Anyone may send each. */
+  dues: Due[];
+  /** Under the dues: who may send them, and whether the keeper is about to. Null when nothing is due. */
+  duesNote: string | null;
+  /** On a missed campaign: who sends a backer's refund, and from where. */
+  refunds: string | null;
   control: string;
   asOf: string;
 };
+
+/** One payout the contract still owes on a settled campaign. `side` is the contract's own number: 0 the recipient, 1 the match back, 2 the bonus back. */
+export type Due = { side: 0 | 1 | 2; button: string; line: string };
+
+/**
+ * What a settled campaign still owes besides its backers, worked out exactly as the contract's
+ * `paySide` does: the recipient when it was funded; the match back when it was not; whatever of
+ * the bonus the backers did not earn, back to whoever locked it.
+ */
+export function duesOf(c: CampaignView): Due[] {
+  const { terms: t, state: s } = c;
+  if (s.outcome === Outcome.Open) return [];
+  const dues: Due[] = [];
+  if (s.outcome === Outcome.Funded && !s.recipientPaid) {
+    const amount = s.pledged + t.matchAmount;
+    if (amount > 0n) dues.push({ side: 0, button: "Pay the recipient", line: `${formatUsd(amount)} USDC is owed to the recipient.` });
+  }
+  if (s.outcome !== Outcome.Funded && s.matchIn && !s.matchReturned && t.matchAmount > 0n) {
+    dues.push({ side: 1, button: "Return the match", line: `The sponsor's ${formatUsd(t.matchAmount)} USDC match is owed back to the sponsor.` });
+  }
+  if (s.bonusIn && !s.bonusReturned) {
+    const amount = s.outcome === Outcome.Missed ? t.bonusPool - s.bonusPaid : t.bonusPool;
+    if (amount > 0n) dues.push({ side: 2, button: "Return the bonus", line: `${formatUsd(amount)} USDC of bonus that was not paid out is owed back to ${t.bonusFromRecipient ? "the recipient" : "the sponsor"}.` });
+  }
+  return dues;
+}
+
+const KEEPER_SOON = "The keeper usually does it within seconds.";
 
 export const CONTROL = "Nobody controls this contract. It has no owner, no upgrade and no pause; the rules on this page are all it can do.";
 
@@ -62,7 +97,8 @@ function promiseOf(c: CampaignView, phase: Phase, now: bigint): string {
       // "went" only where the contract's own flag says the recipient has been paid.
       return `The target was met. ${formatUsd(s.pledged + t.matchAmount)} USDC ${s.recipientPaid ? "went" : "goes"} to the recipient${t.matchAmount > 0n ? `, the sponsor's ${formatUsd(t.matchAmount)} match included` : ""}.`;
     case "missed":
-      return t.bonusPool > 0n
+      // The bonus is promised only where the contract recorded one for the early backers.
+      return s.bonusPaid > 0n
         ? "The goal was missed. Every pledge goes back to its backer, and early backers share the bonus."
         : "The goal was missed. Every pledge goes back to its backer.";
     case "void":
@@ -109,8 +145,18 @@ function rowsOf(c: CampaignView): Row[] {
   return rows;
 }
 
-export function campaignPage(o: { campaign: CampaignView; labels: readonly Label[]; desk: Address | null; now: bigint; block: bigint }): CampaignPage {
+export function campaignPage(o: {
+  campaign: CampaignView;
+  labels: readonly Label[];
+  desk: Address | null;
+  now: bigint;
+  block: bigint;
+  /** Whether the keeper answered at this read. When it did not, no sentence says it is about to act. */
+  keeperUp?: boolean;
+}): CampaignPage {
   const c = o.campaign;
+  const keeperUp = o.keeperUp ?? true;
+  const dues = duesOf(c);
   const { terms: t, state: s } = c;
   const phase = phaseOf(t, s, o.now);
   const p = progressOf(t, s);
@@ -149,7 +195,19 @@ export function campaignPage(o: { campaign: CampaignView; labels: readonly Label
     rows: rowsOf(c),
     pledgeHref: taking ? hrefFor({ page: "pledge", id: c.id }) : null,
     pledgeWhy: taking ? null : phase === "waiting" ? "It takes pledges once it opens." : "This campaign is no longer taking pledges.",
-    settle: phase === "ended" ? { button: "Settle this campaign", note: "Anyone can do this, and it can only do what the rules say. The keeper usually does it within seconds." } : null,
+    settle:
+      phase === "ended"
+        ? {
+            button: "Settle this campaign",
+            note: `Anyone can do this, and it can only do what the rules say. ${keeperUp ? KEEPER_SOON : "The keeper is not answering right now, so it waits for someone to press this."}`,
+          }
+        : null,
+    dues,
+    duesNote:
+      dues.length === 0
+        ? null
+        : `Anyone can send these, and each can only pay the address the contract names. ${keeperUp ? KEEPER_SOON : "The keeper is not answering right now, so they wait for someone to press them."}`,
+    refunds: phase === "missed" ? `A backer can send their own refund from this page with their wallet connected. ${keeperUp ? "The keeper usually sends it first, within seconds." : "The keeper is not answering right now."}` : null,
     control: CONTROL,
     asOf: `As of block ${o.block}`,
   };
@@ -159,6 +217,15 @@ export function campaignPage(o: { campaign: CampaignView; labels: readonly Label
 export function noSuchCampaign(id: bigint, count: bigint): { title: string; line: string; homeHref: string } {
   const line = count === 0n ? "This contract has no campaigns yet." : count === 1n ? "This contract has one campaign, number 1." : `This contract has campaigns 1 to ${count}.`;
   return { title: `There is no campaign ${id}`, line, homeHref: hrefFor({ page: "home" }) };
+}
+
+/**
+ * A campaign number that is not among those read. A number the contract has (an old campaign, read
+ * on its own at the next read) or one the desk has just opened is on its way, not missing.
+ */
+export function missingPage(o: { id: bigint; count: bigint; expected: boolean }): { loading: boolean; title: string; line: string; homeHref: string } {
+  if (o.expected || (o.id >= 1n && o.id <= o.count)) return { loading: true, title: `Reading campaign ${o.id}`, line: "", homeHref: hrefFor({ page: "home" }) };
+  return { loading: false, ...noSuchCampaign(o.id, o.count) };
 }
 
 /** An address the app does not understand. What was asked for is shown as plain text, cut short. */

@@ -14,6 +14,7 @@ export function useDesk(ctx: Ctx): DeskState {
     setState({ busy: true, line: null, ok: false });
     void ctx.askForCampaign().then((answer) => {
       setState({ busy: false, line: answer.line, ok: answer.ok });
+      if (answer.ok && answer.id !== null) ctx.expect(answer.id);
       ctx.refresh();
       if (answer.ok && answer.id !== null) window.location.hash = hrefFor({ page: "campaign", id: answer.id });
     });

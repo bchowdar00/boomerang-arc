@@ -19,13 +19,15 @@ export { tokenAbi };
 const boomerang = boomerangAbi as unknown as Abi;
 
 /**
- * A pledge: an approval for exactly the amount when the current allowance is short, then the
- * pledge. The approval is never for more than this pledge.
+ * A pledge: an approval when the current allowance is short, then the pledge. The approval is for
+ * `taken`, what the contract will take (never more than the campaign still needs), so typing more
+ * than that leaves no allowance standing; without `taken` it is for the amount.
  */
-export function pledgeCalls(o: { boomerang: Address; usdc: Address; id: bigint; amount: bigint; allowance: bigint }): Call[] {
+export function pledgeCalls(o: { boomerang: Address; usdc: Address; id: bigint; amount: bigint; allowance: bigint; taken?: bigint }): Call[] {
   const calls: Call[] = [];
-  if (o.allowance < o.amount) {
-    calls.push({ label: "Allow the campaign contract to take this pledge", to: o.usdc, abi: tokenAbi as unknown as Abi, functionName: "approve", args: [o.boomerang, o.amount] });
+  const need = o.taken !== undefined && o.taken < o.amount ? o.taken : o.amount;
+  if (o.allowance < need) {
+    calls.push({ label: "Allow the campaign contract to take this pledge", to: o.usdc, abi: tokenAbi as unknown as Abi, functionName: "approve", args: [o.boomerang, need] });
   }
   calls.push({ label: "Pledge", to: o.boomerang, abi: boomerang, functionName: "pledge", args: [o.id, o.amount] });
   return calls;
@@ -39,6 +41,15 @@ export function finalizeCall(o: { boomerang: Address; id: bigint }): Call {
 /** Send one backer what a missed campaign owes them. Anyone may send this; it pays only the backer. */
 export function payCall(o: { boomerang: Address; id: bigint; backer: Address }): Call {
   return { label: "Send the refund", to: o.boomerang, abi: boomerang, functionName: "pay", args: [o.id, o.backer] };
+}
+
+/**
+ * Pay one side of a settled campaign: 0 the recipient, 1 the match back to the sponsor, 2 the
+ * unpaid bonus back to whoever locked it. Anyone may send this; it pays only the address the
+ * contract names, and nothing when nothing is owed.
+ */
+export function paySideCall(o: { boomerang: Address; id: bigint; side: 0 | 1 | 2; label: string }): Call {
+  return { label: o.label, to: o.boomerang, abi: boomerang, functionName: "paySide", args: [o.id, o.side] };
 }
 
 /** Point a backer's own refund at another address. Only the backer may send this. */

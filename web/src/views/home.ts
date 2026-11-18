@@ -22,7 +22,17 @@ export type HomePage = {
   asOf: string;
 };
 
-export function homePage(o: { campaigns: readonly CampaignView[]; labels: readonly Label[]; desk: Address | null; now: bigint; block: bigint }): HomePage {
+export function homePage(o: {
+  campaigns: readonly CampaignView[];
+  /** How many campaigns the contract has in all; `campaigns` may be only the newest of them. Left out, it is taken to be all of them. */
+  count?: bigint;
+  labels: readonly Label[];
+  desk: Address | null;
+  now: bigint;
+  block: bigint;
+}): HomePage {
+  const count = o.count ?? BigInt(o.campaigns.length);
+  const capped = BigInt(o.campaigns.length) < count;
   let backers = 0;
   let pledged = 0n;
   let toRecipients = 0n;
@@ -52,11 +62,12 @@ export function homePage(o: { campaigns: readonly CampaignView[]; labels: readon
   }
   return {
     totals: [
-      { label: "Campaigns", value: String(o.campaigns.length) },
+      { label: "Campaigns", value: String(count) },
       { label: "Backers, campaign by campaign", value: String(backers) },
       { label: "Pledged", value: `${formatUsd(pledged)} USDC` },
       { label: "Raised for recipients", value: `${formatUsd(toRecipients)} USDC` },
       { label: "Refunds and bonus for backers of missed campaigns", value: `${formatUsd(backToBackers + bonus)} USDC` },
+      ...(capped ? [{ label: "The sums of backers and money cover", value: `the newest ${o.campaigns.length} of ${count} campaigns` }] : []),
     ],
     running,
     settled,

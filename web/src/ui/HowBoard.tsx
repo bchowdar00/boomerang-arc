@@ -15,7 +15,7 @@ export const HowBoard = memo(function HowBoard() {
         </h2>
         <ol className="steps">
           <li className="on">
-            <h3>A sponsor locks two pots</h3>
+            <h3>Two pots are locked</h3>
             <p>Before anyone pledges, a match for the recipient and a bonus for early backers go into the contract.</p>
           </li>
           <li>
@@ -24,11 +24,11 @@ export const HowBoard = memo(function HowBoard() {
           </li>
           <li>
             <h3>Met: cleared</h3>
-            <p>The recipient gets every pledge plus the match. The bonus goes back to the sponsor.</p>
+            <p>The recipient gets every pledge plus the match. The bonus goes back to whoever locked it.</p>
           </li>
           <li className="miss">
             <h3>Missed: returned</h3>
-            <p>Every pledge comes back by itself, early ones with the bonus. The match goes back to the sponsor.</p>
+            <p>Every pledge comes back in full, early ones with the bonus. The match goes back to the sponsor.</p>
           </li>
         </ol>
       </div>

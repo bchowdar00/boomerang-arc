@@ -1,18 +1,26 @@
 import type { Ctx } from "../app/context.ts";
 import { hrefFor } from "../app/route.ts";
-import { campaignIn } from "../app/world.ts";
-import { finalizeCall } from "../flows/calls.ts";
+import { campaignIn, ownIn } from "../app/world.ts";
+import { finalizeCall, payCall, paySideCall } from "../flows/calls.ts";
 import { Band, OutcomeStamp } from "../ui/Board.tsx";
 import { Chart } from "../ui/Chart.tsx";
 import { Cheque } from "../ui/Cheque.tsx";
 import { Feed, Rows, Section, SendStatus } from "../ui/parts.tsx";
 import { agoOf, boardView, settledLine } from "../views/board.ts";
-import { campaignPage, noSuchCampaign } from "../views/campaign.ts";
+import { campaignPage, missingPage } from "../views/campaign.ts";
 import { feedView } from "../views/feed.ts";
+import { minePage } from "../views/mine.ts";
 import { WORDS } from "../views/shell.ts";
 
 export function Missing({ ctx, id }: { ctx: Ctx; id: bigint }) {
-  const page = noSuchCampaign(id, ctx.world.count);
+  const page = missingPage({ id, count: ctx.world.count, expected: ctx.expected(id) });
+  if (page.loading) {
+    return (
+      <section className="lost" aria-busy="true">
+        <p className="quiet">{page.title}…</p>
+      </section>
+    );
+  }
   return (
     <section className="lost">
       <h1>{page.title}</h1>
@@ -29,7 +37,19 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
   const { world, config } = ctx;
   const campaign = campaignIn(world, id);
   if (!campaign) return <Missing ctx={ctx} id={id} />;
-  const page = campaignPage({ campaign, labels: ctx.labels, desk: config.desk, now: world.now, block: world.block });
+  const page = campaignPage({ campaign, labels: ctx.labels, desk: config.desk, now: world.now, block: world.block, keeperUp: world.keeper.up });
+  // Without an account the buttons that send something become one way to connect; with no wallet at all there is nothing to press.
+  const connectButton = ctx.account === null && ctx.hasWallet ? (
+    <button type="button" className="btn btn-line" onClick={ctx.connect}>
+      {WORDS.connect}
+    </button>
+  ) : null;
+  // The connected account's own pledge to this campaign, in My money's own words; it offers the refund when one is owed.
+  const own = ownIn(world, ctx.account);
+  const myRow = own.known
+    ? (minePage({ account: ctx.account, mine: own.mine.filter((m) => m.campaign.id === id), labels: ctx.labels, desk: config.desk, block: world.block, keeperUp: world.keeper.up }).rows[0] ?? null)
+    : null;
+  const payKey = `pay:${id}`;
   const board = boardView({ campaign, now: world.now });
   const ledger = world.keeper.up ? world.keeper.ledger : null;
   const feed = feedView({ ledger, campaign: id, limit: 4 });
@@ -77,13 +97,57 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
                     <button type="button" className="btn btn-ink" disabled={!ctx.maySend} onClick={() => void ctx.send(key, [finalizeCall({ boomerang: config.boomerang, id })])}>
                       {page.settle.button}
                     </button>
-                  ) : null}
+                  ) : (
+                    connectButton
+                  )}
                   <p className="quiet">{page.settle.note}</p>
                   <SendStatus state={sending} />
                 </div>
               ) : page.pledgeWhy ? (
                 <p className="quiet">{page.pledgeWhy}</p>
               ) : null}
+              {myRow && myRow.send && ctx.account ? (
+                <div className="dues">
+                  <ul>
+                    <li>
+                      <p>{myRow.line}</p>
+                      <button type="button" className="btn btn-line" disabled={!ctx.maySend} onClick={() => void ctx.send(payKey, [payCall({ boomerang: config.boomerang, id, backer: ctx.account! })])}>
+                        {myRow.send.button}
+                      </button>
+                      <SendStatus state={ctx.sendState(payKey)} />
+                    </li>
+                  </ul>
+                  <p className="quiet">{myRow.send.note}</p>
+                </div>
+              ) : null}
+              {page.dues.length > 0 ? (
+                <div className="dues">
+                  <ul>
+                    {page.dues.map((d) => {
+                      const dueKey = `side:${id}:${d.side}`;
+                      return (
+                        <li key={d.side}>
+                          <p>{d.line}</p>
+                          {ctx.account ? (
+                            <button
+                              type="button"
+                              className="btn btn-line"
+                              disabled={!ctx.maySend}
+                              onClick={() => void ctx.send(dueKey, [paySideCall({ boomerang: config.boomerang, id, side: d.side, label: d.button })])}
+                            >
+                              {d.button}
+                            </button>
+                          ) : null}
+                          <SendStatus state={ctx.sendState(dueKey)} />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {connectButton}
+                  <p className="quiet">{page.duesNote}</p>
+                </div>
+              ) : null}
+              {page.refunds && !(myRow && myRow.send && ctx.account) ? <p className="quiet">{page.refunds}</p> : null}
             </section>
           )}
         </div>

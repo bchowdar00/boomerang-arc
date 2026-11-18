@@ -22,7 +22,7 @@ function Outcome({ mark }: { mark: Mark }) {
 }
 
 export function Ledger({ ctx }: { ctx: Ctx }) {
-  const table = ledgerView({ campaigns: ctx.world.campaigns, labels: ctx.labels, desk: ctx.config.desk, now: ctx.world.now, block: ctx.world.block });
+  const table = ledgerView({ campaigns: ctx.world.campaigns, count: ctx.world.count, labels: ctx.labels, desk: ctx.config.desk, now: ctx.world.now, block: ctx.world.block });
   const totals = table.totals;
 
   return (

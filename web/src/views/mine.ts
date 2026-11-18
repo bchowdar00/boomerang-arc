@@ -34,9 +34,27 @@ export type MinePage = {
  * `mine` is what `loadMine` read from the contract. My money takes nothing from the keeper or its
  * ledger: every figure is the contract's own.
  */
-export function minePage(o: { account: Address | null; mine: readonly MyPledge[]; labels: readonly Label[]; desk: Address | null; block: bigint }): MinePage {
+export function minePage(o: {
+  account: Address | null;
+  mine: readonly MyPledge[];
+  labels: readonly Label[];
+  desk: Address | null;
+  block: bigint;
+  /** Whether the keeper answered at this read. When it did not, no sentence says it is about to act. */
+  keeperUp?: boolean;
+  /** Whether this browser has any wallet at all. */
+  hasWallet?: boolean;
+  /** How many campaigns the contract has and how many of the newest this page read; pledges are looked for only in those. */
+  count?: bigint;
+  read?: number;
+}): MinePage {
   const asOf = `As of block ${o.block}`;
-  if (o.account === null) return { account: null, rows: [], empty: "Connect a wallet to see your pledges.", totals: [], asOf };
+  if (o.account === null) {
+    const empty = (o.hasWallet ?? true) ? "Connect a wallet to see your pledges." : "No wallet found in this browser, so there are no pledges to show. Every campaign can be read without one.";
+    return { account: null, rows: [], empty, totals: [], asOf };
+  }
+  const soon = (o.keeperUp ?? true) ? "The keeper usually does it within seconds." : "The keeper is not answering right now, so it waits for someone to press it.";
+  const capped = o.count !== undefined && o.read !== undefined && BigInt(o.read) < o.count;
   const me = o.account.toLowerCase();
   let counted = 0n;
   let owed = 0n;
@@ -59,15 +77,16 @@ export function minePage(o: { account: Address | null; mine: readonly MyPledge[]
       kind: standing.kind,
       line: standing.line,
       refundTo: redirectTo !== null && (standing.kind === "counted" || standing.kind === "owed") ? `A refund would go to ${short(b.payTo)}, as this account asked.` : null,
-      send: standing.kind === "owed" ? { button: "Send my refund", note: "Anyone can send this, and it can only pay the address above. The keeper usually does it within seconds.", campaign: c.id } : null,
+      send: standing.kind === "owed" ? { button: "Send my refund", note: `Anyone can send this, and it can only pay the backer's own refund address. ${soon}`, campaign: c.id } : null,
     });
   }
   const totals = [
-    { label: "In open campaigns", value: `${formatUsd(counted)} USDC` },
+    { label: "In campaigns not yet settled", value: `${formatUsd(counted)} USDC` },
     { label: "Owed to you now", value: `${formatUsd(owed)} USDC` },
     { label: "Came back to you", value: `${formatUsd(returned)} USDC` },
     { label: "Went to funded campaigns", value: `${formatUsd(given)} USDC` },
   ];
   if (chosen > 0n) totals.push({ label: "Paid to addresses you chose", value: `${formatUsd(chosen)} USDC` });
-  return { account: short(o.account), rows, empty: rows.length === 0 ? "This account has not pledged to any campaign here." : null, totals, asOf };
+  if (capped) totals.push({ label: "Looked for in", value: `the newest ${o.read} of ${o.count} campaigns` });
+  return { account: short(o.account), rows, empty: rows.length > 0 ? null : capped ? `This account has not pledged to any of the newest ${o.read} campaigns. Older ones are not read by this page.` : "This account has not pledged to any campaign here.", totals, asOf };
 }

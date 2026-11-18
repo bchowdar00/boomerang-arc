@@ -10,7 +10,7 @@ export function Mine({ ctx }: { ctx: Ctx }) {
   // The pledges read belong to `world.account`; until a read for the connected account arrives, show nothing of another's.
   const own = ownIn(world, ctx.account);
   const account = own.known ? ctx.account : null;
-  const page = minePage({ account, mine: own.mine, labels: ctx.labels, desk: config.desk, block: world.block });
+  const page = minePage({ account, mine: own.mine, labels: ctx.labels, desk: config.desk, block: world.block, keeperUp: world.keeper.up, hasWallet: ctx.hasWallet, count: world.count, read: world.campaigns.length });
 
   return (
     <article className="mine">
@@ -20,7 +20,7 @@ export function Mine({ ctx }: { ctx: Ctx }) {
       {page.empty && !(ctx.account !== null && account === null) ? (
         <p className="mine-empty">
           {page.empty}{" "}
-          {ctx.account === null ? (
+          {ctx.account === null && ctx.hasWallet ? (
             <button type="button" className="btn btn-ink" onClick={ctx.connect}>
               {WORDS.connect}
             </button>

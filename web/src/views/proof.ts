@@ -12,6 +12,7 @@ import type { CampaignView, Custody } from "../data/load.ts";
 import { formatUsd } from "../data/money.ts";
 import { utcStamp } from "../data/time.ts";
 import type { Row } from "./campaign.ts";
+import { SOURCE } from "./shell.ts";
 
 export type ProofPage = {
   custody: { state: "ok" | "short" | "unread"; line: string; detail: string };
@@ -27,14 +28,15 @@ export type ProofPage = {
   keeperErrors: string[];
   facts: Row[];
   /** How to check all of this without trusting this page. */
-  yourself: { line: string; command: string };
+  yourself: { line: string; commands: string[] };
   limits: string[];
 };
 
 export const LIMITS: readonly string[] = [
   "This runs on Arc Testnet with test USDC. No real money is involved and no real campaign has run on it.",
   "The names and descriptions of campaigns are this site's words. The contract holds only amounts, dates and addresses.",
-  "The keeper and the Stream make payouts prompt; they are not needed for them. With both off, anyone can make the same calls and nothing is lost, only later.",
+  "The keeper and the Stream make payouts prompt; they are not needed for them. With both off nothing is lost, only later: from this site anyone can settle a campaign, pay its recipient and return the pots that were not paid out, and a backer can send their own refund from the campaign's page or from My money. Someone else's refund can be sent by anyone, but only by calling the contract with that backer's address.",
+  "This site opens campaigns only through its desk, on fixed ten-minute terms. A sponsor with other terms calls the contract directly. The router for pledges from other chains is deployed, but this site has no form for such a pledge yet.",
   "A pledge from another chain is refunded on Arc, to the backer's address there, not back across the bridge.",
   "A one-signature pledge is sent by the keeper, which pays its gas. The signature can move the backer's USDC only into the campaign and amount it names, once, within three minutes. When the keeper is down or refuses, the page offers the two-step pledge, which needs no keeper.",
   "The second ledger is only as good as the events delivered to the keeper. When it disagrees with the contract, the contract is right.",
@@ -85,17 +87,20 @@ export function proofPage(o: {
     const s = standing(o.ledger, { owed: c.owed, events: c.events });
     if (s.kind === "behind") {
       const hole = o.ledger.missing;
+      const rejected = o.health?.rejected ?? 0;
       const by = `${s.by} ${s.by === 1n ? "event" : "events"}`;
       second = {
         state: "behind",
         line:
           hole === null
-            ? `The keeper's ledger is ${by} behind the contract. It is late, not wrong; the figures are compared once it catches up.`
+            ? rejected > 0
+              ? `The keeper's ledger is ${by} behind the contract, and the keeper has set ${rejected} ${rejected === 1 ? "event" : "events"} aside as not fitting. It is not compared until it has caught up.`
+              : `The keeper's ledger is ${by} behind the contract. It is late, not wrong; the figures are compared once it catches up.`
             : `The keeper's ledger is ${by} behind the contract, and ${hole.from === hole.to ? `event ${hole.from}` : `events ${hole.from} to ${hole.to}`} never reached it. It cannot catch up until the Stream delivers them again, and it is not compared until then.`,
         differences: [],
       };
     } else if (s.kind === "ahead") {
-      second = { state: "ahead", line: `The keeper's ledger holds ${s.by} more ${s.by === 1n ? "event" : "events"} than this contract has emitted. It is not this contract's ledger, and it is not used.`, differences: [] };
+      second = { state: "ahead", line: `The keeper's ledger holds ${s.by} more ${s.by === 1n ? "event" : "events"} than the contract had emitted at block ${c.block}, so it is not compared at this read. That is normal for a moment when a newer block reaches the keeper first; if it stays, the ledger is not this contract's.`, differences: [] };
     } else {
       const found = [...s.differences];
       const readIds = new Set(o.campaigns.map((x) => x.id));
@@ -151,7 +156,7 @@ export function proofPage(o: {
           { label: "Calls sent", value: `${h.sent} went through, ${h.failedSends} did not` },
           { label: "Calls given up on", value: h.gaveUp.length === 0 ? "None" : String(h.gaveUp.length) },
           { label: "Stream store", value: h.kvError === null ? "No fault reported" : `Fault reported: ${h.kvError}` },
-          { label: "Everything due is settled", value: h.settled ? "Yes" : "Not yet" },
+          { label: "Every settled campaign fully paid, by the keeper's ledger", value: h.settled ? "Yes" : "Not yet" },
         ];
 
   return {
@@ -166,8 +171,8 @@ export function proofPage(o: {
       { label: "Owner", value: "None. The contract has no owner, no upgrade, no pause and no way to move funds outside its rules." },
     ],
     yourself: {
-      line: "You do not have to trust this page. From a copy of the repository, one command re-checks the live contract without any key: its code, how it was created, that it has no owner, that it holds what it owes, and that its events add up to its state.",
-      command: "node scripts/check-live.mjs",
+      line: "You do not have to trust this page. With git and Node 26, these commands download the code, build the contracts and re-check the live contract without any key: its code, how it was created, that it has no owner, that it holds what it owes, and that a ledger rebuilt from its events matches the state the contract reports for every campaign and every backer.",
+      commands: [`git clone ${SOURCE}`, "cd boomerang-arc", "npm ci", "npm run verify"],
     },
     limits: [...LIMITS],
   };

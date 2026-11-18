@@ -25,6 +25,8 @@ export type PledgeForm = {
   calls: Call[];
 };
 
+const NO_WALLET = "To pledge you need a wallet with USDC on Arc Testnet, and this browser has none. Everything else here can be read without one.";
+
 export function pledgeForm(o: {
   campaign: CampaignView;
   where: { boomerang: Address; usdc: Address };
@@ -37,7 +39,13 @@ export function pledgeForm(o: {
   onRightChain: boolean;
   /** The contract's answer for exactly this amount, if it has arrived. */
   answer: Answer | null;
+  /** Whether this browser has any wallet at all. Without one, the form does not offer to connect. */
+  hasWallet?: boolean;
+  /** USDC the account must keep for gas when it sends the pledge itself on a chain where gas is paid in USDC (Arc). Zero when the keeper sends it, or elsewhere. */
+  gasReserve?: bigint;
 }): PledgeForm {
+  const hasWallet = o.hasWallet ?? true;
+  const reserve = o.gasReserve ?? 0n;
   const { terms: t, state: s } = o.campaign;
   const typed = o.amountText.trim();
   const amount = typed === "" ? null : parseUsd(typed);
@@ -51,16 +59,18 @@ export function pledgeForm(o: {
 
   const blocks: string[] = [];
   if (quote.kind === "refused") blocks.push(quote.line);
-  if (o.account === null) blocks.push("Connect a wallet to pledge.");
+  if (o.account === null) blocks.push(hasWallet ? "Connect a wallet to pledge." : NO_WALLET);
   else if (!o.onRightChain) blocks.push("Your wallet is on another network. Switch it to Arc Testnet.");
   else if (o.balance === null || o.allowance === null) blocks.push("Reading your balance.");
   else if (quote.kind !== "refused" && o.balance < taken) blocks.push(`This account holds ${formatUsd(o.balance)} USDC, which is less than this pledge.`);
+  else if (quote.kind !== "refused" && reserve > 0n && o.balance < taken + reserve)
+    blocks.push(`Gas on this network is paid in USDC, so this account must keep about ${formatUsd(reserve)} for it. It holds ${formatUsd(o.balance)} USDC and can pledge up to ${formatUsd(o.balance > reserve ? o.balance - reserve : 0n)}.`);
   if (quote.kind !== "refused" && o.answer === null) blocks.push("Checking the figure with the contract.");
 
   const canSend = blocks.length === 0;
-  // The approval and the pledge are for what was typed; the contract takes no more than the gap.
-  const calls = canSend ? pledgeCalls({ boomerang: o.where.boomerang, usdc: o.where.usdc, id: o.campaign.id, amount, allowance: o.allowance ?? 0n }) : [];
-  const button = o.account === null ? "Connect a wallet" : quote.kind === "refused" ? "Pledge" : `Pledge ${formatUsd(taken)} USDC`;
+  // The pledge is for what was typed and the contract takes no more than the gap; the approval is for what it takes.
+  const calls = canSend ? pledgeCalls({ boomerang: o.where.boomerang, usdc: o.where.usdc, id: o.campaign.id, amount, allowance: o.allowance ?? 0n, taken }) : [];
+  const button = o.account === null ? (hasWallet ? "Connect a wallet" : "No wallet in this browser") : quote.kind === "refused" ? "Pledge" : `Pledge ${formatUsd(taken)} USDC`;
   return { amount, quote, line: quote.line, source: quote.kind === "refused" ? "none" : o.answer === null ? "estimate" : "contract", blocks, canSend, button, calls };
 }
 

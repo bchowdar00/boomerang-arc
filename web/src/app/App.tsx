@@ -27,7 +27,7 @@ import type { Config } from "./config.ts";
 import type { Ctx, RelayOutcome, SendState, SignedGuard } from "./context.ts";
 import { startPoll, type Poll, type PollHost } from "./poll.ts";
 import { hrefFor, routeOf, type Route } from "./route.ts";
-import { readWorld, type World } from "./world.ts";
+import { campaignIn, readWorld, type World } from "./world.ts";
 
 const EVERY_MS = 4000;
 
@@ -71,6 +71,7 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
 
   // The wallet: which ones this browser has, the one in use, its account and its chain.
   const [wallets, setWallets] = useState<FoundWallet[]>(extraWallet ? [extraWallet] : []);
+  const [looked, setLooked] = useState(false);
   const [wallet, setWallet] = useState<FoundWallet | null>(null);
   const [account, setAccount] = useState<Address | null>(null);
   const [walletChainId, setWalletChainId] = useState<number | null>(null);
@@ -99,6 +100,7 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
     void discover(window, (type) => new Event(type)).then(async (found) => {
       if (gone) return;
       setWallets(extraWallet ? [...found, extraWallet] : found);
+      setLooked(true);
       for (const w of found) if (await use(w, false)) break;
     });
     return () => {
@@ -149,6 +151,10 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
   const [readFailed, setReadFailed] = useState(false);
   const accountRef = useRef<Address | null>(null);
   accountRef.current = account;
+  // The campaign the page is on, so a read takes it in even when it is older than the newest fifty.
+  const shownId = route.page === "campaign" || route.page === "pledge" ? route.id : null;
+  const shownRef = useRef<bigint | null>(null);
+  shownRef.current = shownId;
   const poll = useRef<Poll | null>(null);
   useEffect(() => {
     const p = startPoll({
@@ -161,6 +167,7 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
             where: { boomerang: config.boomerang, usdc: config.usdc },
             account: accountRef.current,
             keeper: () => askKeeper({ url: config.keeperUrl, fetch: netFetch }),
+            also: shownRef.current,
           });
           if (!live()) return; // given up on: a newer read is under way or already shown
           setWorld(w);
@@ -180,6 +187,15 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
   useEffect(() => {
     refresh(); // a new account's figures are read at once
   }, [account, refresh]);
+  // A campaign the last read did not take in (an old one, or one just opened) is read at once.
+  const shownMissing = shownId !== null && world !== null && campaignIn(world, shownId) === undefined;
+  useEffect(() => {
+    if (shownMissing) refresh();
+  }, [shownMissing, shownId, refresh]);
+  // Campaigns the desk has just opened: on their way until a read shows them. The wait is bounded,
+  // so a number that never arrives ends as "there is no campaign", not as reading for ever.
+  const [expecting, setExpecting] = useState<readonly { id: bigint; until: number }[]>([]);
+  const expect = useCallback((id: bigint) => setExpecting((all) => [...all.filter((e) => e.id !== id), { id, until: Date.now() + 90_000 }]), []);
 
   // What is being sent, by key, one send at a time.
   const [sends, setSends] = useState<Record<string, SendState>>({});
@@ -401,6 +417,9 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
       signedGuard,
       sendState: (key) => sends[key] ?? null,
       connect,
+      hasWallet: wallets.length > 0 || !looked, // until the search for wallets has ended, nothing says there is none
+      expected: (id) => expecting.some((e) => e.id === id && Date.now() < e.until),
+      expect,
       quote,
       askForUsdc: () => (account === null ? Promise.resolve({ ok: false as const, line: WORDS.connect }) : askForUsdc({ url: config.keeperUrl, fetch: netFetch, address: account })),
       askForCampaign: () => askForCampaign({ url: config.keeperUrl, fetch: netFetch }),

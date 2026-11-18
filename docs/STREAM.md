@@ -1,8 +1,8 @@
 # The QuickNode Stream
 
 **Status:** created at QuickNode and delivering on Arc Testnet since 2026-11-17 (Stream `boomerang-arc-testnet`, from block 72640266, webhook to the keeper on Azure); the keeper accepts every delivery. The filter was also tested locally against QuickNode's documented payload shape.
-**Last reconciled:** 2026-11-15 (docs read at quicknode.com/docs/streams on that day).
-**Known gaps:** how QuickNode's store reports a failed write (by throwing, or in its return value) is not documented, and the filter only catches a throw; what a read of a list that does not exist returns is not documented either, so the filter treats only an error that names a missing list or key as empty and reports every other error; credits per block on Arc Testnet are not published and are not yet measured; Arc's docs say blocks arrive faster than once a second and that several may share one timestamp (docs.arc.io/integrate/infrastructure, read 2026-11-15), but the actual rate is not yet measured, so the filter's three timing constants are first guesses: at two blocks a second, "every 25th block" is about 12 seconds and the heartbeat about 2.5 minutes; the Stream's id and the webhook's host are not set, because the account and the host do not exist yet.
+**Last reconciled:** 2026-11-18 (status and gaps; QuickNode's docs were read at quicknode.com/docs/streams on 2026-11-15).
+**Known gaps:** how QuickNode's store reports a failed write (by throwing, or in its return value) is not documented, and the filter only catches a throw; what a read of a list that does not exist returns is not documented either, so the filter treats only an error that names a missing list or key as empty and reports every other error; credits per block on Arc Testnet are not published and are not yet measured; Arc's docs say blocks arrive faster than once a second and that several may share one timestamp (docs.arc.io/integrate/infrastructure, read 2026-11-15), but the actual rate is not yet measured, so the filter's three timing constants are first guesses: at two blocks a second, "every 25th block" is about 12 seconds and the heartbeat about 2.5 minutes.
 
 ## What it is for
 
@@ -33,7 +33,7 @@ One function, `main(stream)`, with no imports and no network access. For each bl
 3. **Say when a time has passed.**
    - `opened: [ids]`, once, at the first block at or after a campaign's opening time. What matters is that a delivery arrives at that moment: on every delivery the keeper plans from its own ledger, so it finds a campaign whose opening time has passed with a pot left out (a void campaign) and finalizes it, whether or not the list names it.
    - `due: [ids]` from the first block at or after the deadline, on every block for 10 seconds and then on every 25th block, until the campaign's `Finalized` event is seen. The repeats are the retry: the keeper sends a given call at most once per 20 seconds, so a repeated `due` costs a delivery, not gas.
-4. **Send a heartbeat.** Every 300th block is delivered even when empty, marked `beat`. The keeper keeps its own ledger of campaigns from the logs, so a heartbeat lets it settle a campaign whose deadline the filter's store lost. The keeper's `/health` reports the block of the last heartbeat, which is how the Proof page will show that the Stream is alive.
+4. **Send a heartbeat.** Every 300th block is delivered even when empty, marked `beat`. The keeper keeps its own ledger of campaigns from the logs, so a heartbeat lets it settle a campaign whose deadline the filter's store lost. The keeper's `/health` reports the block of the last heartbeat, which is how the Proof page shows that the Stream is alive.
 5. **Otherwise deliver nothing.** Any other block with no Boomerang log and no passed time returns `null`. QuickNode bills per block processed whatever the filter returns, so this saves the keeper's bandwidth, not credits.
 
 ### When the Key-Value Store fails

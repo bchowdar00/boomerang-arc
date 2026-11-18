@@ -18,6 +18,8 @@ export type World = {
   /** How many campaigns the contract has; `campaigns` holds the newest fifty of them, newest first. */
   count: bigint;
   campaigns: CampaignView[];
+  /** The campaign the page asked for, when the contract has it and it is older than those fifty; read at the same block. */
+  extra: CampaignView | null;
   custody: Custody;
   /** The connected account, its pledges, its USDC and what it has allowed the contract to take. */
   account: Address | null;
@@ -31,6 +33,9 @@ export type World = {
   backerTotal: number;
 };
 
+/** How many of the newest campaigns one read takes in. */
+export const NEWEST = 50;
+
 const tokenAbi = [
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "allowance", stateMutability: "view", inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }], outputs: [{ type: "uint256" }] },
@@ -42,6 +47,10 @@ export async function readWorld(o: {
   account: Address | null;
   /** Asks the keeper; must not throw (see `askKeeper`). */
   keeper: () => Promise<KeeperAnswer>;
+  /** A campaign the page is showing. When the contract has it and it is older than the newest fifty, it is read too, at the same block. */
+  also?: bigint | null;
+  /** How many of the newest campaigns to read; the page reads `NEWEST`. */
+  newest?: number;
 }): Promise<World> {
   const keeper = o.keeper(); // started now, awaited last: a slow keeper never delays the contract's figures being read
   const block = await o.client.getBlock();
@@ -57,13 +66,17 @@ export async function readWorld(o: {
           o.client.readContract({ address: o.where.usdc, abi: tokenAbi, functionName: "allowance", args: [account, o.where.boomerang], ...at }),
         ]) as Promise<[bigint, bigint]>);
 
-  const [count, campaigns, custody, [balance, allowance]] = await Promise.all([
+  const [count, newest, custody, [balance, allowance]] = await Promise.all([
     reads.campaignCount(),
-    loadCampaigns(reads, 50),
+    loadCampaigns(reads, o.newest ?? NEWEST),
     custodyAt(o.client, o.where, block),
     wallet,
   ]);
-  const mine = account === null ? [] : await loadMine(reads, campaigns, account);
+  const also = o.also ?? null;
+  const campaigns = newest;
+  const extra = also !== null && also >= 1n && also <= count && !newest.some((c) => c.id === also) ? await reads.campaign(also) : null;
+  // The account's pledges are looked for in the campaigns read, the asked-for older one among them.
+  const mine = account === null ? [] : await loadMine(reads, extra === null ? campaigns : [...campaigns, extra], account);
   const answer = await keeper;
 
   // For up to 100 of the keeper's ledger backer records (newest campaigns first), read the
@@ -79,10 +92,9 @@ export async function readWorld(o: {
     backerChecks = await inBatches(pairs.slice(0, 100), 8, async (p) => ({ id: p.id, address: p.address, chain: await reads.backerOf(p.id, p.address) }));
   }
 
-  return { block: block.number, now: block.timestamp, count, campaigns, custody, account, mine, balance, allowance, keeper: answer, backerChecks, backerTotal };
+  return { block: block.number, now: block.timestamp, count, campaigns, extra, custody, account, mine, balance, allowance, keeper: answer, backerChecks, backerTotal };
 }
 
-/** The campaign with this number, if it is among those read. */
 /**
  * What the page may show as the connected account's own. The world was read for `world.account`;
  * until a read for `account` lands, nothing of another account's is shown.
@@ -92,6 +104,7 @@ export function ownIn(world: World, account: Address | null): { known: boolean; 
   return { known: true, mine: world.mine, balance: world.balance, allowance: world.allowance };
 }
 
+/** The campaign with this number, if it is among those read. */
 export function campaignIn(world: World, id: bigint): CampaignView | undefined {
-  return world.campaigns.find((c) => c.id === id);
+  return world.campaigns.find((c) => c.id === id) ?? (world.extra?.id === id ? world.extra : undefined);
 }

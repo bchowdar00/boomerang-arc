@@ -272,6 +272,33 @@
   color: var(--ink-2);
   line-height: 1.5;
 }
+/* What a settled campaign still owes: a line and the button that sends it, one under another. */
+.campaign .dues {
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.campaign .dues ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+.campaign .dues li {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.campaign .dues li > p:first-child {
+  color: var(--ink);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.campaign .dues > .btn {
+  justify-self: start;
+}
 .campaign .settle {
   display: flex;
   flex-direction: column;

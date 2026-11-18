@@ -13,11 +13,12 @@ import { Ledger } from "../ui/Ledger.tsx";
 import { mountLanding, scrollToSection } from "../ui/motion.ts";
 import { explorerLink } from "../views/links.ts";
 import { homePage } from "../views/home.ts";
+import { ledgerSub } from "../views/ledger.ts";
 import { pledgeRoute } from "../views/pledge.ts";
 
 export function Home({ ctx }: { ctx: Ctx }) {
   const { world, config } = ctx;
-  const page = homePage({ campaigns: world.campaigns, labels: ctx.labels, desk: config.desk, now: world.now, block: world.block });
+  const page = homePage({ campaigns: world.campaigns, count: world.count, labels: ctx.labels, desk: config.desk, now: world.now, block: world.block });
   const desk = useDesk(ctx);
   const source = explorerLink(config.chain.explorer, "address", config.boomerang);
   // Said only while it is true: the keeper is relaying signed pledges right now.
@@ -49,7 +50,7 @@ export function Home({ ctx }: { ctx: Ctx }) {
               </span>
             </h1>
             <p className="lede">
-              Back a goal in USDC. If it hits its target, the recipient is paid. If it falls short, every pledge comes back on its own, and early backers earn a bonus.
+              Back a goal in USDC. If it hits its target, the recipient is paid. If it falls short, every pledge comes back in full, and early backers earn a bonus.
             </p>
             <div className="hero-cheque">
               <HeroCheque ctx={ctx} />
@@ -67,7 +68,7 @@ export function Home({ ctx }: { ctx: Ctx }) {
                   <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4" />
                   <path d="M8 4.6V8l2.3 1.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 </svg>
-                Paid back on its own after the deadline
+                Paid back after the deadline, even if this site is gone
               </span>
               {oneSignature ? (
                 <span>
@@ -91,7 +92,7 @@ export function Home({ ctx }: { ctx: Ctx }) {
         <h2 id="ledger-h">
           Cleared, <em>or returned.</em>
         </h2>
-        <p className="sub">Every campaign on the contract, read from the chain. Each closed with exactly one of its sponsor's pots paid out.</p>
+        <p className="sub">{ledgerSub({ count: world.count, read: world.campaigns.length })}</p>
         <Ledger ctx={ctx} />
       </section>
 
@@ -126,7 +127,7 @@ export function Home({ ctx }: { ctx: Ctx }) {
               <b>No pause, no upgrade</b>The contract you check is the one that pays.
             </p>
             <p>
-              <b>Never short</b>It never holds less than it owes, checked after every action.
+              <b>Never short</b>It is built never to hold less than it owes, and Proof re-checks that at every read.
             </p>
           </div>
         </div>

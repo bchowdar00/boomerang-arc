@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { setup, USD } from "./helpers.ts";
-import { readWorld } from "../../web/src/app/world.ts";
+import { campaignIn, readWorld } from "../../web/src/app/world.ts";
 import type { KeeperAnswer } from "../../web/src/data/ask.ts";
 import { readHealth } from "../../web/src/data/health.ts";
 import type { LedgerView } from "../../web/src/data/keeper.ts";
@@ -73,6 +73,28 @@ describe("the app's one-block read", function () {
     assert.equal(after.campaigns[0].state.pledged, 60n * USD);
     assert.equal(before.campaigns[0].state.pledged, 0n);
     assert.equal(after.custody.owed - before.custody.owed, 60n * USD);
+  });
+
+  it("world.also: a campaign older than those read is read on its own at the same block, with the account's pledge to it", async function () {
+    const w = await setup();
+    const a = await w.open();
+    const b = await w.open();
+    await w.time.increaseTo(a.t.opensAt);
+    await w.pledge(a.id, w.alice, 60n * USD, a.t.opensAt + 10n);
+    const where = { boomerang: w.boomerang.address, usdc: w.usdc.address };
+    const alice = w.alice.account.address;
+    // Reading only the newest one leaves campaign `a` out, unless the page asks for it.
+    const without = await readWorld({ client: w.publicClient, where, account: alice, keeper: noKeeper, newest: 1 });
+    assert.deepEqual([without.count, without.campaigns.map((c) => c.id), without.extra, without.mine.length], [2n, [b.id], null, 0]);
+    assert.equal(campaignIn(without, a.id), undefined);
+    const withIt = await readWorld({ client: w.publicClient, where, account: alice, keeper: noKeeper, newest: 1, also: a.id });
+    assert.deepEqual(withIt.campaigns.map((c) => c.id), [b.id]); // the newest are still only the newest
+    assert.equal(withIt.extra?.id, a.id);
+    assert.equal(campaignIn(withIt, a.id)?.state.pledged, 60n * USD);
+    assert.deepEqual(withIt.mine.map((m) => [m.campaign.id, m.backer.principal]), [[a.id, 60n * USD]]);
+    // A number already among those read, or one the contract does not have, adds nothing.
+    assert.equal((await readWorld({ client: w.publicClient, where, account: null, keeper: noKeeper, newest: 1, also: b.id })).extra, null);
+    assert.equal((await readWorld({ client: w.publicClient, where, account: null, keeper: noKeeper, newest: 1, also: 99n })).extra, null);
   });
 
   it("world.backers: the contract's own backer records are read at the one block, and a ledger with one wrong record reads differs", async function () {

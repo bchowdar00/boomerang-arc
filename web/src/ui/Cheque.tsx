@@ -74,6 +74,9 @@ function Sheet({ head, children, onSubmit, labelledBy }: { head: ReactNode; chil
   );
 }
 
+/** What a visitor keeps back for gas on Arc when sending a pledge themself: an approval and a pledge have cost about 0.006 USDC there. */
+const GAS_RESERVE = 20_000n;
+
 /**
  * The pledge form for one campaign. `choices` turns the payee line into a list to pick from (the
  * landing page); without it the payee is the campaign's name. `initial` is the amount the cheque
@@ -143,6 +146,9 @@ export function Cheque({
     allowance: own.allowance,
     onRightChain: ctx.onRightChain,
     answer: answered !== null && typed !== null && answered.amount === typed ? answered.answer : null,
+    hasWallet: ctx.hasWallet,
+    // On Arc gas is paid in USDC. A pledge the visitor sends themself (the two-step route) needs some left over; one the keeper relays does not.
+    gasReserve: !config.chain.local && pledgeRoute({ signedPledge: config.signedPledge, relay: ctx.relay, fellBack: twoStep }) !== "signed" ? GAS_RESERVE : 0n,
   });
   const receipt = receiptView({ form, campaign });
   const key = `pledge:${id}`;
@@ -285,7 +291,7 @@ export function Cheque({
             <span className="cq-line">{receipt.line}</span>
           )}
         </div>
-        <button className="btn btn-ink" type="submit" disabled={ctx.account !== null && (!form.canSend || !ctx.maySend)}>
+        <button className="btn btn-ink" type="submit" disabled={ctx.account !== null ? !form.canSend || !ctx.maySend : !ctx.hasWallet}>
           {button}
           <span className="arrow" aria-hidden="true">
             →

@@ -92,7 +92,7 @@ export function Proof({ ctx }: { ctx: Ctx }) {
       <Section title={WORDS.proof.yourself}>
         <p className="proof-line">{page.yourself.line}</p>
         <pre>
-          <code>{page.yourself.command}</code>
+          <code>{page.yourself.commands.join("\n")}</code>
         </pre>
       </Section>
 

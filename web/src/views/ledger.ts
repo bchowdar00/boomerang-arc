@@ -54,9 +54,10 @@ function markOf(c: CampaignView, now: bigint): Mark {
   const { terms: t, state: s } = c;
   switch (phaseOf(t, s, now)) {
     case "funded":
-      return { kind: "cleared", word: "Cleared", small: `${formatUsd(s.pledged)} + ${formatUsd(t.matchAmount)} match` };
+      // A pot of nothing is not shown as "+ 0.00".
+      return { kind: "cleared", word: "Cleared", small: t.matchAmount > 0n ? `${formatUsd(s.pledged)} + ${formatUsd(t.matchAmount)} match` : formatUsd(s.pledged) };
     case "missed":
-      return { kind: "returned", word: "Returned", small: `${formatUsd(s.pledged)} + ${formatUsd(s.bonusPaid)} bonus` };
+      return { kind: "returned", word: "Returned", small: s.bonusPaid > 0n ? `${formatUsd(s.pledged)} + ${formatUsd(s.bonusPaid)} bonus` : formatUsd(s.pledged) };
     case "void":
       return { kind: "void", word: "Never opened", small: "no pledge was taken" };
     case "ended":
@@ -71,10 +72,16 @@ function markOf(c: CampaignView, now: bigint): Mark {
   }
 }
 
-export function ledgerView(o: { campaigns: readonly CampaignView[]; labels: readonly Label[]; desk: Address | null; now: bigint; block: bigint }): LedgerTable {
+/** The line over the table: which campaigns it lists, and the one rule every closed one kept. */
+export function ledgerSub(o: { count: bigint; read: number }): string {
+  const which = BigInt(o.read) < o.count ? `The newest ${o.read} of the contract's ${o.count} campaigns` : "Every campaign on the contract";
+  return `${which}, read from the chain. Each one that has closed paid out at most one of its two pots.`;
+}
+
+export function ledgerView(o: { campaigns: readonly CampaignView[]; count?: bigint; labels: readonly Label[]; desk: Address | null; now: bigint; block: bigint }): LedgerTable {
   // homePage already splits the campaigns into running-then-settled (newest first) and derives each
   // card's name and status from the campaign page, so the table borrows both rather than redo them.
-  const home = homePage(o);
+  const home = homePage(o); // `count` goes with it, so the totals name the contract's own number of campaigns
   const byHref = new Map(o.campaigns.map((c) => [hrefFor({ page: "campaign", id: c.id }), c]));
   const rows: LedgerRow[] = [];
   for (const card of [...home.running, ...home.settled]) {

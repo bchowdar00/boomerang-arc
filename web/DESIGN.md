@@ -52,13 +52,15 @@ Self-hosted variable faces (`@fontsource-variable/*` 5.3.0, OFL-1.1), imported i
 
 `src/pages/Campaign.tsx`. Wide: the name; then on the left a strip of three figures (To go, Time left, and Early bonus ends in while that window is open, otherwise Backers) over the chart on a sheet; on the right the cheque, which stays in view while scrolling. Then the rule in one italic sentence, and two columns of ruled rows: what has happened, and the terms.
 
-Once a campaign stops taking pledges the cheque gives way to a voucher: the outcome stamp, what happened in figures, and the Settle button while it is waiting to be settled. A phone gets one column: name, cheque or voucher, figures, chart, rule, events, terms.
+Once a campaign stops taking pledges the cheque gives way to a voucher: the outcome stamp, what happened in figures, and the Settle button while it is waiting to be settled. Under a ruled line the voucher then lists, first, the connected backer's own refund when one is owed (in My money's words, with its button), and then whatever the contract still owes the recipient or the funders of the pots (by its own paid flags), each with a line button anyone may press: Pay the recipient, Return the match, Return the bonus. The keeper normally sends these within seconds, so they are seen mostly when it is down, and the note under them says which is the case. The stamp is the contract's recorded outcome; what has and has not been paid yet is said in the lines under it. A phone gets one column: name, cheque or voucher, figures, chart, rule, events, terms.
 
 The chart (`src/ui/Chart.tsx`, `src/views/chart.ts`) keeps its geometry: opening to closing across, the early window tinted, a dashed target line, a dotted pace line while pledges can come in, and the climb in ink. A screen reader gets a sentence and a table.
 
 `#/campaign/N/pledge` is the same page with the cursor in the amount field.
 
 ## My money and Proof
+
+Proof's "Check it yourself" block is four commands that work from nothing (clone, `npm ci`, `npm run verify`); the last builds the contracts and runs the keyless live check.
 
 Working screens: a Fraunces heading, then ruled rows. On My money a pledge that is owed back or came back is set in vermilion. On Proof each verdict is a sentence with a drawn check or cross in front, ink when it holds and vermilion when it does not.
 
@@ -79,5 +81,5 @@ Every sentence comes from a tested view function in `src/views/` or `src/data/`;
 
 ## Checks
 
-- Tests: `test/board.test.ts` (figures, clocks, outcomes, chart geometry, flip), `test/ledger.test.ts` (the campaigns table), `test/guilloche.test.ts` (the engraved lines), `test/views.test.ts` (every page's words, the frame).
-- Seen in a browser on the local loop at 1440 and 390 wide: the landing page top to bottom, a campaign taking pledges, a returned and a cleared campaign, My money, Proof, and a one-signature pledge from the landing page's cheque.
+- Tests: `test/holes.test.ts` (what the page offers and says with the keeper down, with no wallet, at the edges of the terms and past fifty campaigns), `test/board.test.ts` (figures, clocks, outcomes, chart geometry, flip), `test/ledger.test.ts` (the campaigns table), `test/guilloche.test.ts` (the engraved lines), `test/views.test.ts` (every page's words, the frame).
+- Seen in a browser on the local loop at 1440 and 390 wide: the landing page top to bottom, a campaign taking pledges, a returned and a cleared campaign, My money, Proof, and a one-signature pledge from the landing page's cheque. With the keeper frozen (2026-11-18): a two-step pledge, Settle, Pay the recipient, Return the match, Return the bonus and Send my refund, each from the page.

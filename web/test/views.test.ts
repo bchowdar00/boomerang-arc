@@ -92,6 +92,9 @@ describe("the Campaign page", function () {
       pledgeHref: "#/campaign/7/pledge",
       pledgeWhy: null,
       settle: null,
+      dues: [],
+      duesNote: null,
+      refunds: null,
       control: CONTROL,
       asOf: "As of block 99",
     });
@@ -425,12 +428,12 @@ describe("My money", function () {
     assert.match(page.rows[0].line, /^25\.00 is counted\. If the campaign misses as it stands, it comes back with about \d+\.\d\d\.$/);
     // 124 of 1,240 weighted: a tenth of the 62.00 bonus paid.
     assert.equal(page.rows[1].line, "124.00 plus 6.20 bonus is yours. Anyone can send it; you can too.");
-    assert.deepEqual(page.rows[1].send, { button: "Send my refund", note: "Anyone can send this, and it can only pay the address above. The keeper usually does it within seconds.", campaign: 3n });
+    assert.deepEqual(page.rows[1].send, { button: "Send my refund", note: "Anyone can send this, and it can only pay the backer's own refund address. The keeper usually does it within seconds.", campaign: 3n });
     assert.equal(page.rows[2].line, "124.00 came back, plus 6.20 bonus.");
     assert.equal(page.rows[3].line, "40.00 went to the campaign. It was funded.");
     assert.deepEqual(page.rows.map((r) => r.send === null), [true, false, true, true]);
     assert.deepEqual(page.totals, [
-      { label: "In open campaigns", value: "25.00 USDC" },
+      { label: "In campaigns not yet settled", value: "25.00 USDC" },
       { label: "Owed to you now", value: "130.20 USDC" },
       { label: "Came back to you", value: "130.20 USDC" },
       { label: "Went to funded campaigns", value: "40.00 USDC" },
@@ -446,7 +449,7 @@ describe("My money", function () {
     const paid = minePage({ account: ME, mine: [mine(missed, usd(124), { payTo: RECIPIENT, paid: true })], labels: [], desk: null, block: 9n });
     assert.equal(paid.rows[0].line, "130.20 was paid to 0x0000…00aa, the address you chose.");
     assert.deepEqual(paid.totals, [
-      { label: "In open campaigns", value: "0.00 USDC" },
+      { label: "In campaigns not yet settled", value: "0.00 USDC" },
       { label: "Owed to you now", value: "0.00 USDC" },
       { label: "Came back to you", value: "0.00 USDC" },
       { label: "Went to funded campaigns", value: "0.00 USDC" },
@@ -542,10 +545,11 @@ describe("the Proof page", function () {
       { label: "Calls sent", value: "4 went through, 1 did not" },
       { label: "Calls given up on", value: "None" },
       { label: "Stream store", value: "No fault reported" },
-      { label: "Everything due is settled", value: "Yes" },
+      { label: "Every settled campaign fully paid, by the keeper's ledger", value: "Yes" },
     ]);
     assert.deepEqual(p.facts.map((f) => [f.label, f.address]), [["Contract", BOOMERANG], ["Token (USDC)", USDC], ["Router for pledges from other chains", where.router], ["Owner", undefined]]);
-    assert.equal(p.yourself.command, "node scripts/check-live.mjs");
+    // Runnable by someone who has only this page: fetch the code, install, then the one script that builds and checks.
+    assert.deepEqual(p.yourself.commands, ["git clone https://github.com/bchowdar00/boomerang-arc", "cd boomerang-arc", "npm ci", "npm run verify"]);
     assert.deepEqual(p.limits, [...LIMITS]);
     assert.ok(LIMITS.length >= 5);
   });
@@ -572,9 +576,12 @@ describe("the Proof page", function () {
     assert.equal(holed.second.state, "behind");
     assert.equal(holed.second.line, "The keeper's ledger is 3 events behind the contract, and events 10 to 11 never reached it. It cannot catch up until the Stream delivers them again, and it is not compared until then.");
     assert.match(page({ ledger: ledger({ lastSeq: 9n, missing: { from: 10n, to: 10n } }) }).second.line, /and event 10 never reached it/);
+    // Behind because events were refused, not because they are late: the page does not call that "late, not wrong".
+    const refused = page({ ledger: ledger({ lastSeq: 9n }), health: { ...health, rejected: 2 } });
+    assert.equal(refused.second.line, "The keeper's ledger is 3 events behind the contract, and the keeper has set 2 events aside as not fitting. It is not compared until it has caught up.");
     const foreign = page({ ledger: ledger({ lastSeq: 14n }) });
     assert.equal(foreign.second.state, "ahead");
-    assert.match(foreign.second.line, /holds 2 more events than this contract has emitted/);
+    assert.match(foreign.second.line, /holds 2 more events than the contract had emitted at block 400, so it is not compared at this read/);
   });
 
   it("a level ledger that disagrees is listed difference by difference, and the page says which side is right", function () {
@@ -634,7 +641,7 @@ describe("the Proof page", function () {
     assert.equal(page({ health: { ...troubled, absent: [9n] } }).stream!.find((r) => r.label === "Campaigns in the events that the contract does not have (or not yet)")!.value, "Number 9");
     assert.equal(value("Calls given up on"), "1");
     assert.equal(value("Stream store"), "Fault reported: kv down");
-    assert.equal(value("Everything due is settled"), "Not yet");
+    assert.equal(value("Every settled campaign fully paid, by the keeper's ledger"), "Not yet");
     assert.deepEqual(p.keeperErrors, ["gave up on finalize:7"]);
   });
 });
