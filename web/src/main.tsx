@@ -6,11 +6,17 @@ import { createRoot, type Root } from "react-dom/client";
 import { App } from "./app/App.tsx";
 import { configFrom, ConfigError, type Config } from "./app/config.ts";
 import { readLabels, type Label } from "./data/labels.ts";
-// The board's lettering and the sentences' face, self-hosted (OFL-1.1), Latin only.
-import "@fontsource/barlow/latin-400.css";
-import "@fontsource/barlow/latin-500.css";
-import "@fontsource/barlow-condensed/latin-600.css";
-import "@fontsource/barlow-condensed/latin-700.css";
+// The faces, self-hosted (OFL-1.1): Fraunces for headings and the cheque's hand (all its axes,
+// upright and italic), Geist for sentences and figures, Geist Mono for addresses.
+import "@fontsource-variable/fraunces/full.css";
+import "@fontsource-variable/fraunces/full-italic.css";
+import "@fontsource-variable/geist/wght.css";
+import "@fontsource-variable/geist-mono/wght.css";
+// One world, in this order: what every page shares, then each surface's own sheet.
+import "./styles/world.css";
+import "./styles/scene.css";
+import "./styles/cheque.css";
+import "./styles/landing.css";
 import "./styles/app.css";
 import { DEV_WALLET_NAME, startProblem } from "./views/start.ts";
 import { devWallet, devWalletFrom } from "./wallet/devWallet.ts";

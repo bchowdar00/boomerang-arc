@@ -15,13 +15,13 @@ export function Mine({ ctx }: { ctx: Ctx }) {
   return (
     <article className="mine">
       <h1>{WORDS.mine.title}</h1>
-      {page.account ? <p className="by">{page.account}</p> : null}
+      {page.account ? <p className="mine-account mono">{page.account}</p> : null}
       {ctx.account !== null && account === null ? <p className="quiet">{WORDS.loading}</p> : null}
       {page.empty && !(ctx.account !== null && account === null) ? (
-        <p>
+        <p className="mine-empty">
           {page.empty}{" "}
           {ctx.account === null ? (
-            <button type="button" onClick={ctx.connect}>
+            <button type="button" className="btn btn-ink" onClick={ctx.connect}>
               {WORDS.connect}
             </button>
           ) : null}
@@ -35,11 +35,11 @@ export function Mine({ ctx }: { ctx: Ctx }) {
             return (
               <li key={r.href} className={`pledge-row kind-${r.kind}`}>
                 <a href={r.href}>{r.title}</a>
-                <p>{r.line}</p>
+                <p className="pledge-line">{r.line}</p>
                 {r.refundTo ? <p className="quiet">{r.refundTo}</p> : null}
                 {r.send && account ? (
-                  <div>
-                    <button type="button" disabled={!ctx.maySend} onClick={() => void ctx.send(key, [payCall({ boomerang: config.boomerang, id: r.send!.campaign, backer: account })])}>
+                  <div className="pledge-pay">
+                    <button type="button" className="btn btn-line" disabled={!ctx.maySend} onClick={() => void ctx.send(key, [payCall({ boomerang: config.boomerang, id: r.send!.campaign, backer: account })])}>
                       {r.send.button}
                     </button>
                     <p className="quiet">{r.send.note}</p>

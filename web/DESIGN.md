@@ -1,100 +1,83 @@
 # Boomerang's page: the design as built
 
-The campaign page is a school gym's scoreboard that already shows both endings. The board says how much is left and how long. The receipt beside it says what one pledge does if the target is met and what comes back if it is not, with the contract's own figure, before anyone pays.
+One world: security paper. The page is a bank's stationery, and the pledge form is a cheque: "Pay to the order of" the campaign, "the sum of" what is typed, and beside the button both endings in the receipt's own sentences: what comes back if it falls short, as the contract's figure, and where the money goes if the target is met. Green ink does the reading. Vermilion means only one thing: it came back.
 
-The approved direction is `design/DIRECTION.md` in the build folder. This file records what the code does, and it wins where the two differ.
+The approved comp is `design/mockups-b/src/c-cheque.html` in the build folder (the landing page; picked 2026-11-17). This file records what the code does, and it wins where the two differ. The look it replaced, a blue scoreboard, is gone.
 
 ## Colour
 
-The board is the same royal blue in both themes. The page around it follows the reader's light or dark setting. Tokens are at the top of `src/styles/app.css`.
+Light only. Tokens are at the top of `src/styles/world.css`.
 
 | Token | Value | Use |
 |---|---|---|
-| `--field` | `#1d3fbf` | the board |
-| `--plate` | `#142c8a` | recessed plates, the receipt |
-| `--band` | `#2a4dcc` | the early-bonus band on the chart |
-| `--chalk` | `#f5f7ff` | figures, the plate rules, chart lettering |
-| `--chalk-soft` | `#b9c4f2` | captions, units, secondary lines on the board |
-| `--flag` | `#ffd23f` | a figure that is still moving, and the Pledge button |
-| `--on-flag` | `#10204f` | text on yellow |
-| `--ground` | `#eef1f8` light, `#0a1338` dark | the page |
-| `--ink` / `--soft` | `#10204f` / `#4a5680` light, `#eef1ff` / `#a9b6e6` dark | text off the board |
-| `--link` | `#1d3fbf` light, `#8ea2ec` dark | links, focus rings off the board |
+| `--paper` | `#edf2ea` | the page |
+| `--sheet` | `#f6f9f3` | a document on the page: the cheque, the chart, the how-it-works board, a settled campaign's voucher |
+| `--ink` | `#12392c` | text, figures, the main button, the Cleared stamp |
+| `--ink-2` | `#2f5546` | secondary sentences |
+| `--ink-soft` | `#557366` | captions and quiet notes (4.6:1 on the paper; nothing lighter is used for text) |
+| `--guil` / `--rule` | `#b7ccb4` / `#cfdccb` | engraved lines, dashed tear lines / hairlines between rows |
+| `--verm` | `#b8352a` | "it came back": the Returned stamp, the cheque's "If it falls short" figure, money owed or returned to a backer; and errors |
 
-Yellow means one thing: this figure is still moving. It is used for TO GO while pledges can come in, the early-bonus clock, the "if it falls short" amount while the bonus can still change, and the now point on the chart. A settled figure is chalk.
-
-Contrast, computed:
-- chalk on the field 7.8, on a plate 11.17, on the band 6.47;
-- yellow on the field 5.78, on a plate 8.28;
-- chalk-soft on the field 4.87, on a plate 6.97;
-- navy on yellow 10.84, on the light ground 13.84;
-- `--soft` on the light ground 6.33.
-
-Chalk-soft is never used on the band, where it would measure 4.04.
+Vermilion is never decoration, hover or emphasis. A figure that is still moving gets no colour of its own.
 
 ## Type
 
-- **Barlow Condensed 600 and 700** (self-hosted, `@fontsource/barlow-condensed` 5.2.8, Latin): the board's numerals, the campaign name, headings and the board's captions.
-- **Barlow 400 and 500** (`@fontsource/barlow` 5.2.8): every sentence.
-- Uppercase appears on the board only: captions, units, flags, Home's campaign names and the campaign's h1.
-- Two digit sizes on the board. TO GO and a result flag use `clamp(3rem, 1.6rem + 4.2vw, 5.25rem)`; the other plates use `clamp(2.25rem, 1.5rem + 2.2vw, 3.5rem)`.
-- Figures use tabular numerals.
-- Monospace is for addresses only.
+Self-hosted variable faces (`@fontsource-variable/*` 5.3.0, OFL-1.1), imported in `src/main.tsx`.
+
+- **Fraunces** (all axes, upright and italic): headings, the brand, campaign names, and the cheque's printed wording in italic. Display sizes use `"opsz" 120` to `144` and `"SOFT" 30`, weight 600, tracking -0.03em.
+- **Geist**: every sentence and every figure. Figures are weight 600 with tabular numerals.
+- **Geist Mono**: addresses and commands only.
+- Sentence case everywhere. The only uppercase is a rubber stamp.
 
 ## Shape
 
-The board has square corners and no shadows: it is painted, not floating. Plates are parted by 2px chalk rules, drawn as a 2px gap over a chalk background. Controls off the board have 4px corners. The receipt's two halves are parted by a dashed tear line.
+- A sheet has a 10 to 12px corner and one soft shadow with an offset. Sheets are never nested.
+- Lists and terms are not cards: they are ruled rows on the paper, a 1.5px ink rule on top and 1px hairlines between.
+- An outcome is a rotated rubber stamp (2 to 3px border in its own colour, uppercase, tracked, `mix-blend-mode: multiply`): Cleared in ink, Returned in vermilion, Never opened in soft ink.
+- The guilloche (rosette and waves) is drawn by formula in `src/views/guilloche.ts`; nothing is an image.
 
-## The campaign page
+## The landing page (`#/`)
 
-1. **Band:** three plates while the campaign takes pledges or waits (`views/board.ts`).
-   - TO GO comes first. The second plate is TIME LEFT, or OPENS IN before opening.
-   - The third is EARLY BONUS ENDS IN while the early window is open and there is a bonus pool, otherwise BACKERS.
-   - Once the campaign is over, a result flag (REACHED, FELL SHORT or NEVER OPENED) and two plates: DEADLINE and BACKERS.
-   - A plate's clock shows days, then hours, then `m:ss` as time runs out.
-2. **Chart:** inline SVG at the size it is shown (`views/chart.ts`, `ui/Chart.tsx`).
-   - Opening to closing across, the early band, a dashed target line, and the now point at the contract's total.
-   - While pledges can come in, a dotted PACE NEEDED line and the now line are drawn too. Before opening and once closed, neither is drawn.
-   - The climb line is the keeper's running total of pledges and rescue. It is drawn only when that total equals the contract's; otherwise the chart says why.
-   - A screen reader gets a one-sentence summary and a table of the points.
-3. **Receipt:** the two halves, "If the target is met" and "If it falls short", from the form's quote (`views/receipt.ts`).
-   - A pledge that would finish the campaign collapses it to one line.
-   - Then come the amount field and the yellow Pledge button that names the amount.
-   - The two-step approve-then-pledge, the one-at-a-time submit and the check just before sending are unchanged from the old Pledge page (`ui/PledgeBox.tsx`).
-   - Once the campaign is over, the receipt shows what happened: the status, the figures (for a missed campaign, what goes back and the bonus), and the Settle button where Pledge was.
-   - `#/campaign/N/pledge` is the same page with the cursor in the amount field.
-4. **Under the board:** the rule in one sentence, then the newest four events (with an EARLY tag and how long ago) beside the terms.
+`src/pages/Home.tsx`, scoped under `.landing` in `src/styles/landing.css`.
 
-On a phone (under 760px), TO GO takes the full width, the other two plates share a row, and the receipt comes before the chart. At 390 wide the Pledge button sits in the bottom half of the first screen.
+1. **Hero, a Z.** Headline top left; the flight top right; the cheque bottom left; the flight's caption bottom right. Under 900px: headline, lede, flight with its caption hanging under it, cheque, trust lines.
+2. **The cheque** (`src/ui/Cheque.tsx`, `src/styles/cheque.css`) is the working pledge form, made out to the newest campaign taking pledges (a list when there are several). It starts at 2.00. When no campaign is taking pledges it is blank and offers a ten-minute campaign from the site's desk.
+3. **The flight** (`src/ui/Flight.tsx`, `src/ui/flight.ts`): one 3D boomerang (three.js, loaded after first paint in its own chunk) flies the two endings in turn, landing with the recipient or coming back to you. A line drawing stands in until it has drawn and if WebGL is missing. It pauses off screen and in a hidden tab.
+4. **How it works** (`src/ui/HowBoard.tsx`): on wide screens one board is pinned while scrolling plays a campaign through: pots sealed, pledges in, Cleared, then a second campaign Returned. On a phone and with reduced motion it shows the finished returned campaign. Its figures are from real campaigns on Arc.
+5. **Campaigns** (`src/ui/Ledger.tsx`, `src/views/ledger.ts`): every campaign on the contract, open ones first, each with its stamp; then the contract's running totals.
+6. **The guarantee**: four facts about the contract and its address, linked to the explorer.
+7. **Closing**: one button that starts a ten-minute campaign where the site has a desk.
 
-## Other pages
+## A campaign (`#/campaign/N`)
 
-- **Home** is an out-of-town board: one line per campaign with its name, the board's first two readings and its status. Open campaigns come first.
-- **My money and Proof** are working screens: the palette and type, ruled rows and standard controls, no board.
+`src/pages/Campaign.tsx`. Wide: the name; then on the left a strip of three figures (To go, Time left, and Early bonus ends in while that window is open, otherwise Backers) over the chart on a sheet; on the right the cheque, which stays in view while scrolling. Then the rule in one italic sentence, and two columns of ruled rows: what has happened, and the terms.
+
+Once a campaign stops taking pledges the cheque gives way to a voucher: the outcome stamp, what happened in figures, and the Settle button while it is waiting to be settled. A phone gets one column: name, cheque or voucher, figures, chart, rule, events, terms.
+
+The chart (`src/ui/Chart.tsx`, `src/views/chart.ts`) keeps its geometry: opening to closing across, the early window tinted, a dashed target line, a dotted pace line while pledges can come in, and the climb in ink. A screen reader gets a sentence and a table.
+
+`#/campaign/N/pledge` is the same page with the cursor in the amount field.
+
+## My money and Proof
+
+Working screens: a Fraunces heading, then ruled rows. On My money a pledge that is owed back or came back is set in vermilion. On Proof each verdict is a sentence with a drawn check or cross in front, ink when it holds and vermilion when it does not.
+
+## The frame
+
+`src/app/App.tsx` draws the bar (brand, four links, the wallet), the notices under it, and the foot. "How it works" and "Campaigns" go to those parts of the landing page. The foot of every page carries the one disclaimer: which network this is, that the money is test money, and that the contract is unaudited. No other visible copy says "demo" or "testnet", except where a wallet instruction has to name the network the wallet shows, and the Proof page's list of what the app does not claim.
 
 ## Motion
 
-- **Durations:** 120ms (press, reduced-motion fades), 220ms (interface), 280ms (the flip).
-- **Curve:** `cubic-bezier(0.16, 1, 0.3, 1)`. No ease-in, no bounce, nothing over 500ms.
-- **What animates:** only `transform` and `opacity`, apart from colour transitions on controls.
-- **The flip** (`ui/Plate.tsx`, `views/flip.ts`) is the one authored moment.
-  - When TO GO or BACKERS changes because a pledge or settlement was read from the chain, each changed character slides: the old one up and out, the new one up from below.
-  - Characters go right to left, 40ms apart. Unchanged characters do not move, and nothing moves on first render.
-  - The clocks do not flip: they change every block.
-- **Receipt:** a figure that changes while the typed amount stays the same rises 4px and fades in over 160ms. Typing never animates.
-- **Feed:** a new row fades in from above (250ms, 50ms delay) while the rows below shift down (200ms).
-- **Chart:** the newest step of the climb extends from its riser to the new point (`scaleX`, 400ms).
-- **Press:** `scale(0.97)` over 120ms. Hover effects only on devices with a fine pointer.
-- **Reduced motion:** the flip becomes a 120ms crossfade, feed rows appear in place, and the climb updates without moving.
-- **Screen readers:** a changed total is announced once (`role="status"`, `aria-atomic`).
+- **Curve:** `cubic-bezier(0.16, 1, 0.3, 1)` (`--ease`); GSAP's `expo.out` on the landing page. No bounce.
+- **Landing page** (`src/ui/motion.ts`, GSAP 3.12.5 with ScrollTrigger, Lenis 1.1.13): the headline rises line by line, then the lede, cheque and trust lines in reading order; the rosette traces itself in and turns once every four minutes; the how-it-works board is pinned and scrubbed; ledger rows and their stamps arrive once; smooth scrolling runs only while this page is open. Everything is reverted when the page is left.
+- **Working pages:** a changed figure flips only the digits that changed (`src/ui/Plate.tsx`, `src/views/flip.ts`); the cheque's "If it falls short" figure rises 4px when the contract's answer changes it, never while typing; a new event slides in at the top of its list; the chart's newest step extends. Press is `scale(0.97)`. Hover effects only for a fine pointer.
+- **Reduced motion:** no GSAP, no smooth scroll, one still frame of the flight, crossfades in place of movement.
 
 ## Words
 
-The board's own words: TO GO, TIME LEFT, EARLY BONUS ENDS IN, OPENS IN, BACKERS, DEADLINE, REACHED, FELL SHORT, NEVER OPENED, EARLY, PACE NEEDED, TARGET, "If the target is met", "If it falls short", and "… ago".
-
-Every other word comes from the tested view functions in `src/views/`. The site speaks of the campaign in the third person. There are no em dashes in visible copy.
+Every sentence comes from a tested view function in `src/views/` or `src/data/`; fixed words are in `WORDS` (`src/views/shell.ts`). Outcomes are called Cleared, Returned and Never opened. The site speaks of a campaign in the third person. There are no em dashes in visible copy.
 
 ## Checks
 
-- Tests: `web/test/board.test.ts` holds the plates, clocks, results, climb, chart geometry, receipt, flip positions, "how long ago" and the missed receipt.
-- Captures of every state at 1280 and 390, light and dark, are in `design/checks/` in the build folder.
+- Tests: `test/board.test.ts` (figures, clocks, outcomes, chart geometry, flip), `test/ledger.test.ts` (the campaigns table), `test/guilloche.test.ts` (the engraved lines), `test/views.test.ts` (every page's words, the frame).
+- Seen in a browser on the local loop at 1440 and 390 wide: the landing page top to bottom, a campaign taking pledges, a returned and a cleared campaign, My money, Proof, and a one-signature pledge from the landing page's cheque.

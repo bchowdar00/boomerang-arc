@@ -28,7 +28,7 @@ export function boardTime(seconds: bigint): { figure: string; unit: string } {
   return { figure: d.toString(), unit: d === 1n ? "day" : "days" };
 }
 
-const backersPlate = (n: number): Plate => ({ key: "backers", caption: "BACKERS", figure: n.toString(), unit: "", live: false });
+const backersPlate = (n: number): Plate => ({ key: "backers", caption: "Backers", figure: n.toString(), unit: "", live: false });
 
 export function boardView(o: { campaign: CampaignView; now: bigint }): BoardView {
   const { terms: t, state: s } = o.campaign;
@@ -37,13 +37,13 @@ export function boardView(o: { campaign: CampaignView; now: bigint }): BoardView
 
   if (phase === "waiting" || phase === "early" || phase === "open") {
     const taking = phase !== "waiting";
-    const togo: Plate = { key: "togo", caption: "TO GO", figure: formatUsd(p.gap), unit: "USDC", live: taking };
+    const togo: Plate = { key: "togo", caption: "To go", figure: formatUsd(p.gap), unit: "USDC", live: taking };
     const clock: Plate = taking
-      ? { key: "time", caption: "TIME LEFT", ...boardTime(t.closesAt - o.now), live: false }
-      : { key: "opens", caption: "OPENS IN", ...boardTime(t.opensAt - o.now), live: false };
+      ? { key: "time", caption: "Time left", ...boardTime(t.closesAt - o.now), live: false }
+      : { key: "opens", caption: "Opens in", ...boardTime(t.opensAt - o.now), live: false };
     const third: Plate =
       phase === "early" && t.bonusPool > 0n
-        ? { key: "bonus", caption: "EARLY BONUS ENDS IN", ...boardTime(t.earlyUntil - o.now), live: true }
+        ? { key: "bonus", caption: "Early bonus ends in", ...boardTime(t.earlyUntil - o.now), live: true }
         : backersPlate(s.backers);
     return { plates: [togo, clock, third], result: null };
   }
@@ -51,11 +51,11 @@ export function boardView(o: { campaign: CampaignView; now: bigint }): BoardView
   const kind = phase === "funded" ? "reached" : phase === "void" || (phase === "ended" && endsAs(t, s, o.now) === "void") ? "void" : "short";
   const result: BoardResult =
     kind === "void"
-      ? { kind, flag: "NEVER OPENED", line: "A pot was not locked in time, so no pledge was taken." }
-      : { kind, flag: kind === "reached" ? "REACHED" : "FELL SHORT", line: `${formatUsd(s.pledged)} of ${formatUsd(t.target)} USDC was pledged.${kind === "short" ? " Every pledge goes back." : ""}` };
+      ? { kind, flag: "Never opened", line: "A pot was not locked in time, so no pledge was taken." }
+      : { kind, flag: kind === "reached" ? "Cleared" : "Returned", line: `${formatUsd(s.pledged)} of ${formatUsd(t.target)} USDC was pledged.${kind === "short" ? " Every pledge goes back." : ""}` };
   // "13 Nov 2026, 21:20 UTC" splits into the plate's figure and its unit.
   const [day, month, year] = utcStamp(t.closesAt).replace(",", "").split(" ");
-  const deadline: Plate = { key: "time", caption: "DEADLINE", figure: `${day} ${month}`, unit: year ?? "", live: false };
+  const deadline: Plate = { key: "time", caption: "Deadline", figure: `${day} ${month}`, unit: year ?? "", live: false };
   return { plates: [deadline, backersPlate(s.backers)], result };
 }
 

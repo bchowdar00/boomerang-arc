@@ -38,7 +38,7 @@ The full rules, what each side can lose, the ways to game it and the risk assump
 | The Stream filter | `streams/filter.js` | A QuickNode Streams filter that passes on Boomerang's events and says when a campaign's deadline has passed. |
 | The keeper | `services/keeper/` | Receives the Stream's webhook, rebuilds a ledger from the events alone, and makes the calls that settle a campaign. It has no rights in the contract. |
 | The kit | `packages/kit/` | The contract's arithmetic in TypeScript, event decoding and the event-built ledger, each tested equal to the contract. |
-| The page | `web/` | Reads the contract from the browser. A campaign is a scoreboard (what is left to raise, time left, and the early-bonus clock while it runs, otherwise the backers) with a chart of the climb, and a pledge box whose receipt shows both endings before anyone pays: "If the target is met" and "If it falls short", each with the contract's own figure. Also your money, and a Proof page that sets the keeper's event-built ledger against the contract at one block. Plain files once built; no server of its own. The design as built: [web/DESIGN.md](web/DESIGN.md). |
+| The page | `web/` | Reads the contract from the browser. The pledge form is a cheque: "Pay to the order of" the campaign, "the sum of" what is typed, and beside the button what comes back if the target is missed, in the contract's own figure, before anyone pays. The landing page shows the two endings as a boomerang's flight, plays one campaign through, and lists every campaign on the contract with its outcome, Cleared or Returned. A campaign's own page has what is left to raise, the time left, the early-bonus clock and a chart of the climb. Also your money, and a Proof page that sets the keeper's event-built ledger against the contract at one block. Plain files once built; no server of its own. The design as built: [web/DESIGN.md](web/DESIGN.md). |
 | Scripts | `scripts/` | Deploy, demo campaigns, a keyless check of a live deployment, and the whole app on one machine. |
 
 How the parts fit, and what still works when each one stops: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
@@ -94,7 +94,7 @@ npm test
 
 One of those tests runs the whole pipeline with nothing built by hand in between (`contracts/test/pipeline.test.ts`): the contract's receipts, as the node's JSON-RPC gives them, go through `streams/filter.js`; each thing the filter returns is signed and posted to the keeper's HTTP server; the keeper calls the contract. The only stand-in is for QuickNode itself, the thing that runs the filter once per block.
 
-The whole app on one machine, with nothing deployed and no wallet extension (a local node, the contracts, three example campaigns, the keeper with its demo desk, a local stand-in for the Stream, and the page at `http://127.0.0.1:5173/`):
+The whole app on one machine, with nothing deployed and no wallet extension (a local node, the contracts, three example campaigns, the keeper with its desk, a local stand-in for the Stream, and the page at `http://127.0.0.1:5173/`):
 
 ```bash
 cd contracts && npx hardhat build

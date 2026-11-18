@@ -7,10 +7,12 @@ import { short } from "../data/keeper.ts";
 
 export type Shell = {
   brand: string;
-  tagline: string;
-  /** Shown beside the name on every page: which network, and that the money is test money. */
-  network: string;
-  nav: { href: string; label: string; current: boolean }[];
+  /** The one place the page says which network this is and that the money is test money: the foot of every page. */
+  disclaimer: string;
+  /** The links in the bar. One with a `section` goes to that part of the landing page instead of a page of its own. */
+  nav: { href: string; label: string; current: boolean; section: "how" | "ledger" | null }[];
+  /** The links in the foot: the code, the contract on the explorer when there is one, and Proof. */
+  foot: { href: string; label: string; external: boolean }[];
   wallet: {
     state: "none" | "connect" | "wrong-network" | "ready";
     /** The account, shortened; null until one is connected. */
@@ -23,15 +25,21 @@ export type Shell = {
   asOf: string | null;
 };
 
-const NAV: { route: Route; label: string; pages: Route["page"][] }[] = [
-  { route: { page: "home" }, label: "Campaigns", pages: ["home", "campaign", "pledge"] },
-  { route: { page: "mine" }, label: "My money", pages: ["mine"] },
-  { route: { page: "proof" }, label: "Proof", pages: ["proof"] },
+const NAV: { route: Route; label: string; pages: Route["page"][]; section: "how" | "ledger" | null }[] = [
+  { route: { page: "home" }, label: "How it works", pages: [], section: "how" },
+  { route: { page: "home" }, label: "Campaigns", pages: ["campaign", "pledge"], section: "ledger" },
+  { route: { page: "mine" }, label: "My money", pages: ["mine"], section: null },
+  { route: { page: "proof" }, label: "Proof", pages: ["proof"], section: null },
 ];
+
+/** Where the code is published. */
+export const SOURCE = "https://github.com/bchowdar00/boomerang-arc";
 
 export function shell(o: {
   route: Route;
   chain: { id: number; name: string; local: boolean };
+  /** The contract's page on the block explorer, when the chain has one. */
+  contractLink?: string | null;
   /** How many wallets this browser has; the account connected, if any; the chain that wallet is on, if known. */
   wallets: number;
   account: Address | null;
@@ -43,7 +51,7 @@ export function shell(o: {
   const wallet: Shell["wallet"] =
     o.account === null
       ? o.wallets === 0
-        ? { state: "none", account: null, button: null, note: "No wallet found in this browser. You can read everything here without one; to pledge you need a wallet with test USDC on Arc Testnet." }
+        ? { state: "none", account: null, button: null, note: "No wallet found in this browser. You can read everything here without one; to pledge you need a wallet with USDC on Arc Testnet." }
         : { state: "connect", account: null, button: "Connect a wallet", note: null }
       : o.walletChainId !== null && o.walletChainId !== o.chain.id
         ? { state: "wrong-network", account: short(o.account), button: `Switch to ${o.chain.name}`, note: `Your wallet is on another network. Nothing is sent until it is on ${o.chain.name}.` }
@@ -57,19 +65,30 @@ export function shell(o: {
 
   return {
     brand: "Boomerang",
-    tagline: "Pledge to a goal. If it is missed, your money comes back, with a bonus for backing early.",
-    network: o.chain.local ? `${o.chain.name}, a test chain on this machine` : `${o.chain.name}. Test USDC only: no real money is involved.`,
-    nav: NAV.map((n) => ({ href: hrefFor(n.route), label: n.label, current: n.pages.includes(o.route.page) })),
+    disclaimer: o.chain.local
+      ? `${o.chain.name}, a test chain on this machine.`
+      : `Boomerang runs on ${o.chain.name} with test USDC. No real money is involved, nothing here is an offer or financial advice, and the contract has not been audited.`,
+    nav: NAV.map((n) => ({ href: hrefFor(n.route), label: n.label, current: n.pages.includes(o.route.page), section: n.section })),
+    foot: [
+      { href: SOURCE, label: "GitHub", external: true },
+      ...(o.contractLink ? [{ href: o.contractLink, label: "Explorer", external: true }] : []),
+      { href: hrefFor({ page: "proof" }), label: "Proof", external: false },
+    ],
     wallet,
     banner,
     asOf: o.block === null ? null : `As of block ${o.block}`,
   };
 }
 
-/** The demo desk's offer of test USDC, shown where a visitor is short of it. Null when there is no desk or no account. */
+/** The pledge button when the pledge is one signature: "Pledge 2.00 USDC" becomes "Sign and pledge 2.00 USDC". Any other wording is left as it is. */
+export function signedButton(button: string): string {
+  return button.startsWith("Pledge") ? WORDS.cheque.sign + button.slice("Pledge".length) : button;
+}
+
+/** The desk's offer of USDC, shown where a visitor is short of it. Null when there is no desk or no account. */
 export function deskOffer(o: { desk: Address | null; account: Address | null }): { button: string; note: string } | null {
   if (o.desk === null || o.account === null) return null;
-  return { button: "Get 2.00 test USDC", note: "From this site's demo desk, once per address. Circle's faucet for Arc Testnet gives more." };
+  return { button: "Get 2.00 USDC", note: "From this site's desk, once per address. Circle's faucet for Arc Testnet gives more." };
 }
 
 /** One step of a send, as the visitor reads it while their wallet is asking or the chain is working. */
@@ -90,9 +109,9 @@ export const WORDS = {
     feed: "What has happened",
     siteWords: "The name and description above are this site's words. Every amount, date and address on this page is read from the contract.",
     chainWords: "This campaign has no name on this site. Everything shown is read from the contract.",
-    example: "An example campaign: the people named are invented, and the money is test money.",
-    demo: "A demo campaign: the money is test money.",
-    deskWords: "This site's demo desk opened this campaign, and the name above is this site's. Every amount, date and address on this page is read from the contract.",
+    example: "An example campaign: the people named are invented.",
+    demo: "A ten-minute campaign, opened by this site's desk.",
+    deskWords: "This site's desk opened this campaign, and the name above is this site's. Every amount, date and address on this page is read from the contract.",
     pledge: "Pledge to this campaign",
   },
   pledge: {
@@ -110,6 +129,21 @@ export const WORDS = {
     unconfirmed: "The keeper sent your pledge, but the chain has not confirmed it yet. Check My money in a moment before pledging again.",
     cannotSign: "Your wallet could not make this kind of signature.",
     cannotCheck: "The chain could not be read just now, so nothing was sent. Try again in a moment.",
+  },
+  cheque: {
+    brand: "Boomerang",
+    pays: "pays in USDC on Arc",
+    payTo: "Pay to the order of",
+    sumOf: "the sum of",
+    sign: "Sign and pledge",
+    closesIn: "closes in",
+    opensIn: "opens in",
+    startWith: "2.00",
+    seeIt: "See the campaign.",
+    noneOpen: "No campaign is taking pledges",
+    deskNote: "Start a ten-minute campaign and pledge to it: watch the deadline pass and the money come back.",
+    noneNote: "When a campaign opens, this cheque is made out to it.",
+    start: "Start a ten-minute campaign",
   },
   mine: { title: "My money", totals: "In total" },
   proof: {

@@ -80,9 +80,9 @@ describe("board.plates", () => {
     const b = boardView({ campaign: campaign(), now: OPENS + 2n * HOUR });
     assert.equal(b.result, null);
     assert.deepEqual(b.plates, [
-      { key: "togo", caption: "TO GO", figure: "760.00", unit: "USDC", live: true },
-      { key: "time", caption: "TIME LEFT", figure: "6", unit: "days", live: false },
-      { key: "bonus", caption: "EARLY BONUS ENDS IN", figure: "22", unit: "hrs", live: true },
+      { key: "togo", caption: "To go", figure: "760.00", unit: "USDC", live: true },
+      { key: "time", caption: "Time left", figure: "6", unit: "days", live: false },
+      { key: "bonus", caption: "Early bonus ends in", figure: "22", unit: "hrs", live: true },
     ]);
   });
   it("after the early window: backers takes the bonus plate's place", () => {
@@ -111,9 +111,9 @@ describe("board.waiting", () => {
     const b = boardView({ campaign: campaign({}, { pledged: 0n, backers: 0 }), now: OPENS - 90n });
     assert.equal(b.result, null);
     assert.deepEqual(b.plates, [
-      { key: "togo", caption: "TO GO", figure: "2,000.00", unit: "USDC", live: false },
-      { key: "opens", caption: "OPENS IN", figure: "1:30", unit: "min", live: false },
-      { key: "backers", caption: "BACKERS", figure: "0", unit: "", live: false },
+      { key: "togo", caption: "To go", figure: "2,000.00", unit: "USDC", live: false },
+      { key: "opens", caption: "Opens in", figure: "1:30", unit: "min", live: false },
+      { key: "backers", caption: "Backers", figure: "0", unit: "", live: false },
     ]);
   });
   it("takes no pledge", () => {
@@ -130,10 +130,10 @@ describe("board.result", () => {
   it("funded: REACHED, the deadline's date and the backers", () => {
     const c = campaign({}, { outcome: Outcome.Funded, pledged: usd(2000), backers: 40 });
     const b = boardView({ campaign: c, now: OPENS + 3n * DAY });
-    assert.deepEqual(b.result, { kind: "reached", flag: "REACHED", line: "2,000.00 of 2,000.00 USDC was pledged." });
+    assert.deepEqual(b.result, { kind: "reached", flag: "Cleared", line: "2,000.00 of 2,000.00 USDC was pledged." });
     assert.deepEqual(b.plates, [
-      { key: "time", caption: "DEADLINE", ...deadline(c), live: false },
-      { key: "backers", caption: "BACKERS", figure: "40", unit: "", live: false },
+      { key: "time", caption: "Deadline", ...deadline(c), live: false },
+      { key: "backers", caption: "Backers", figure: "40", unit: "", live: false },
     ]);
     assert.deepEqual(deadline(c), { figure: "13 Nov", unit: "2026" });
   });
@@ -141,7 +141,7 @@ describe("board.result", () => {
     const missed = boardView({ campaign: campaign({}, { outcome: Outcome.Missed }), now: OPENS + 8n * DAY });
     const ended = boardView({ campaign: campaign(), now: OPENS + 8n * DAY });
     for (const b of [missed, ended]) {
-      assert.deepEqual(b.result, { kind: "short", flag: "FELL SHORT", line: "1,240.00 of 2,000.00 USDC was pledged. Every pledge goes back." });
+      assert.deepEqual(b.result, { kind: "short", flag: "Returned", line: "1,240.00 of 2,000.00 USDC was pledged. Every pledge goes back." });
       assert.deepEqual(
         b.plates.map((p) => p.key),
         ["time", "backers"],
@@ -152,7 +152,7 @@ describe("board.result", () => {
     const recorded = boardView({ campaign: campaign({}, { outcome: Outcome.Void, pledged: 0n, backers: 0 }), now: OPENS + DAY });
     const pending = boardView({ campaign: campaign({}, { matchIn: false, pledged: 0n, backers: 0 }), now: OPENS + 10n });
     for (const b of [recorded, pending]) {
-      assert.deepEqual(b.result, { kind: "void", flag: "NEVER OPENED", line: "A pot was not locked in time, so no pledge was taken." });
+      assert.deepEqual(b.result, { kind: "void", flag: "Never opened", line: "A pot was not locked in time, so no pledge was taken." });
     }
   });
 });

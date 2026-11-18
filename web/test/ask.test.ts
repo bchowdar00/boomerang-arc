@@ -57,12 +57,12 @@ describe("asking the keeper", function () {
 
   it("ask.desk: each answer from the desk is said in a sentence, and an answer the page does not know is not passed on", async function () {
     const usdc = async (body: unknown, status = 200) => askForUsdc({ url: URL_, fetch: fake({ "/demo/usdc": { status, body } }).fetch, address: ME });
-    assert.deepEqual(await usdc({ ok: true, hash: "0xfeed" }), { ok: true, line: "The desk sent 2.00 test USDC to your address." });
-    assert.deepEqual(await usdc({ ok: false, reason: "already-given" }, 409), { ok: false, line: "This address has already had its test USDC from the desk." });
-    assert.match((await usdc({ ok: false, reason: "desk-low" }, 409)).line, /out of test USDC/);
+    assert.deepEqual(await usdc({ ok: true, hash: "0xfeed" }), { ok: true, line: "The desk sent 2.00 USDC to your address." });
+    assert.deepEqual(await usdc({ ok: false, reason: "already-given" }, 409), { ok: false, line: "This address has already had its USDC from the desk." });
+    assert.match((await usdc({ ok: false, reason: "desk-low" }, 409)).line, /out of USDC/);
     assert.match((await usdc({ ok: false, reason: "unconfirmed" }, 409)).line, /will not send to this address again/);
     assert.match((await usdc({ ok: false, reason: "busy" }, 409)).line, /busy/);
-    assert.match((await usdc({ ok: false, reason: "no-desk" }, 503)).line, /not running a demo desk/);
+    assert.match((await usdc({ ok: false, reason: "no-desk" }, 503)).line, /not running a desk/);
     // The keeper's own words (a reason this page has no sentence for, a detail field) never reach the page.
     assert.deepEqual(await usdc({ ok: false, reason: "<b>pwned</b>", detail: "<script>" }, 409), { ok: false, line: "The desk could not do that just now." });
     // A reason that names an inherited Object property is not a known refusal: it falls back, never returns a function or object.
@@ -80,7 +80,7 @@ describe("asking the keeper", function () {
     assert.deepEqual([f.seen[0].init.method, f.seen[0].init.body, f.seen[0].init.credentials, f.seen[0].init.redirect], ["POST", JSON.stringify({ address: ME }), "omit", "error"]);
 
     const campaign = async (body: unknown) => askForCampaign({ url: URL_, fetch: fake({ "/demo/campaign": { body } }).fetch });
-    assert.deepEqual(await campaign({ ok: true, id: "7" }), { ok: true, line: "A demo campaign is open. It takes pledges in about a minute and settles in about eleven.", id: 7n });
+    assert.deepEqual(await campaign({ ok: true, id: "7" }), { ok: true, line: "A ten-minute campaign is open. It takes pledges in about a minute and settles in about eleven.", id: 7n });
     assert.equal((await campaign({ ok: true, id: "7; drop" })).id, null);
     assert.equal((await campaign({ ok: true })).id, null);
     const open = await campaign({ ok: false, reason: "campaign-open" });

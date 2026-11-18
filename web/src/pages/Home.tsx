@@ -1,103 +1,162 @@
-import { useState } from "react";
+// The landing page: a hero that reads the headline, the pledge cheque and the flight scene; the
+// pinned "how it works" block; the live campaigns table; the guarantee; and the closing call. All
+// the copy is the mockup's. The page writes no figure of its own: the table and the cheque read
+// the chain, and the motion lives in motion.ts, started once over this page's root.
+import { useEffect, useRef } from "react";
 
 import type { Ctx } from "../app/context.ts";
-import { hrefFor } from "../app/route.ts";
-import type { CampaignView } from "../data/load.ts";
-import { Rows, Section } from "../ui/parts.tsx";
-import { boardView } from "../views/board.ts";
-import { homePage, type Card } from "../views/home.ts";
-import { WORDS } from "../views/shell.ts";
-
-/** One line of the out-of-town board: the name, then the board's first two readings, then the status. */
-function Score({ card, campaign, now }: { card: Card; campaign: CampaignView | undefined; now: bigint }) {
-  const b = campaign ? boardView({ campaign, now }) : null;
-  const first = b?.result ? { caption: "", figure: b.result.flag, unit: "", live: false } : (b?.plates[0] ?? null);
-  const second = b ? (b.result ? b.plates[0] : b.plates[1]) : null;
-  return (
-    <li className="score">
-      <a href={card.href}>
-        <span className="s s-name">
-          <span className="s-title">{card.title}</span>
-          <span className="s-by">{card.by}</span>
-          {card.example ? <span className="tag">{WORDS.home.example}</span> : null}
-        </span>
-        {[first, second].map((p, i) =>
-          p ? (
-            <span className={`s${p.live ? " live" : ""}`} key={i}>
-              {p.caption ? <span className="caption">{p.caption}</span> : null}
-              <span className="s-figure">
-                {p.figure}
-                {p.unit ? <span className="unit">{p.unit}</span> : null}
-              </span>
-            </span>
-          ) : (
-            <span className="s" key={i} />
-          ),
-        )}
-        <span className="s">
-          <span className="s-status">{card.status}</span>
-          <span className="s-by">{card.raised}</span>
-        </span>
-      </a>
-    </li>
-  );
-}
+import { useDesk } from "../ui/desk.ts";
+import { Flight } from "../ui/Flight.tsx";
+import { HeroCheque } from "../ui/Cheque.tsx";
+import { HowBoard } from "../ui/HowBoard.tsx";
+import { Ledger } from "../ui/Ledger.tsx";
+import { mountLanding, scrollToSection } from "../ui/motion.ts";
+import { explorerLink } from "../views/links.ts";
+import { homePage } from "../views/home.ts";
+import { pledgeRoute } from "../views/pledge.ts";
 
 export function Home({ ctx }: { ctx: Ctx }) {
   const { world, config } = ctx;
   const page = homePage({ campaigns: world.campaigns, labels: ctx.labels, desk: config.desk, now: world.now, block: world.block });
-  const byHref = new Map(world.campaigns.map((c) => [hrefFor({ page: "campaign", id: c.id }), c]));
-  const [desk, setDesk] = useState<{ busy: boolean; line: string | null; ok: boolean }>({ busy: false, line: null, ok: false });
+  const desk = useDesk(ctx);
+  const source = explorerLink(config.chain.explorer, "address", config.boomerang);
+  // Said only while it is true: the keeper is relaying signed pledges right now.
+  const oneSignature = pledgeRoute({ signedPledge: config.signedPledge, relay: ctx.relay, fellBack: false }) === "signed";
 
-  const open = async () => {
-    setDesk({ busy: true, line: null, ok: false });
-    const answer = await ctx.askForCampaign();
-    setDesk({ busy: false, line: answer.line, ok: answer.ok });
-    ctx.refresh();
-    if (answer.ok && answer.id !== null) window.location.hash = hrefFor({ page: "campaign", id: answer.id });
-  };
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = root.current;
+    if (el === null) return;
+    return mountLanding(el);
+  }, []);
 
   return (
-    <>
-      {page.demo ? (
-        <section className="demo">
-          <button type="button" onClick={open} disabled={desk.busy}>
-            {page.demo.button}
-          </button>
-          <p className="quiet">{page.demo.note}</p>
-          {desk.line ? (
-            <p className={desk.ok ? "" : "problem"} role="status">
-              {desk.line}
+    <div className="landing" ref={root}>
+      <div className="wrap">
+        <header className="hero">
+          <div className="copy">
+            <h1>
+              <span className="line">
+                <span>Money that</span>
+              </span>
+              <span className="line">
+                <span>comes back</span>
+              </span>
+              <span className="line">
+                <span>
+                  <em>if the goal doesn't.</em>
+                </span>
+              </span>
+            </h1>
+            <p className="lede">
+              Back a goal in USDC. If it hits its target, the recipient is paid. If it falls short, every pledge comes back on its own, and early backers earn a bonus.
             </p>
-          ) : null}
-        </section>
-      ) : null}
+            <div className="hero-cheque">
+              <HeroCheque ctx={ctx} />
+            </div>
+            <div className="trust">
+              <span>
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 1.5 13.5 4v4c0 3.2-2.3 5.6-5.5 6.5C4.8 13.6 2.5 11.2 2.5 8V4Z" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                  <path d="m5.6 8 1.7 1.7L10.6 6.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Verified contract, no owner
+              </span>
+              <span>
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                  <path d="M8 4.6V8l2.3 1.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+                Paid back on its own after the deadline
+              </span>
+              {oneSignature ? (
+                <span>
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M3 9.5 6.5 13 13 4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  One signature, no gas
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <Flight />
+        </header>
+      </div>
 
-      {page.empty ? <p>{page.empty}</p> : null}
+      <section id="how" className="wrap" aria-label="How it works">
+        <HowBoard />
+      </section>
 
-      {page.running.length > 0 ? (
-        <Section title={WORDS.home.running}>
-          <ul className="scores">
-            {page.running.map((c) => (
-              <Score card={c} campaign={byHref.get(c.href)} now={world.now} key={c.href} />
-            ))}
-          </ul>
-        </Section>
-      ) : null}
+      <section id="ledger" className="wrap" aria-labelledby="ledger-h">
+        <h2 id="ledger-h">
+          Cleared, <em>or returned.</em>
+        </h2>
+        <p className="sub">Every campaign on the contract, read from the chain. Each closed with exactly one of its sponsor's pots paid out.</p>
+        <Ledger ctx={ctx} />
+      </section>
 
-      {page.settled.length > 0 ? (
-        <Section title={WORDS.home.settled}>
-          <ul className="scores">
-            {page.settled.map((c) => (
-              <Score card={c} campaign={byHref.get(c.href)} now={world.now} key={c.href} />
-            ))}
-          </ul>
-        </Section>
-      ) : null}
+      <section id="guarantee" className="wrap" aria-labelledby="guarantee-h">
+        <div className="guar">
+          <div>
+            <h2 id="guarantee-h">
+              The promise is in the code, <em>not the page.</em>
+            </h2>
+            <p className="sub">
+              Boomerang is a non-custodial USDC contract. Its source is verified on Arc's explorer, and settlement runs on its own: a QuickNode Stream watches every block, and a keeper with no
+              special rights makes the calls anyone could make.
+            </p>
+            <div className="contract">
+              <span>Contract</span>
+              <span className="mono">{config.boomerang}</span>
+              {source ? (
+                <a href={source} target="_blank" rel="noreferrer noopener">
+                  View source
+                </a>
+              ) : null}
+            </div>
+          </div>
+          <div className="facts">
+            <p>
+              <b>No owner</b>Nobody can change a campaign's rules once it exists.
+            </p>
+            <p>
+              <b>No early exit</b>The sponsor's pots are locked before it opens.
+            </p>
+            <p>
+              <b>No pause, no upgrade</b>The contract you check is the one that pays.
+            </p>
+            <p>
+              <b>Never short</b>It never holds less than it owes, checked after every action.
+            </p>
+          </div>
+        </div>
+      </section>
 
-      <Section title={WORDS.home.totals}>
-        <Rows rows={page.totals} explorer={null} />
-      </Section>
-    </>
+      <section className="closing wrap">
+        <h2>
+          Back it early. <em>It comes back if it misses.</em>
+        </h2>
+        <p className="sub">Start a ten-minute campaign and watch the whole thing play out: pledge, deadline, and the money back.</p>
+        {page.demo ? (
+          <>
+            <button type="button" className="btn btn-ink" onClick={desk.open} disabled={desk.busy}>
+              Start a ten-minute campaign{" "}
+              <span className="arrow" aria-hidden="true">
+                →
+              </span>
+            </button>
+            {desk.line ? (
+              <p className={desk.ok ? "" : "problem"} role="status">
+                {desk.line}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <button type="button" className="btn btn-plain" onClick={() => scrollToSection("ledger")}>
+            See the campaigns
+          </button>
+        )}
+      </section>
+    </div>
   );
 }

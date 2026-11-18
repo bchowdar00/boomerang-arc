@@ -82,7 +82,7 @@ export function Chart({ campaign, ledger, now, raised, backers, live }: { campai
                 <rect className="c-band" x={p.band.x} y={0} width={p.band.w} height={box.h} />
                 {p.band.w > 70 ? (
                   <text className="c-band-label" x={p.band.x + 6} y={16}>
-                    EARLY BONUS
+                    Early bonus
                   </text>
                 ) : null}
               </>
@@ -93,12 +93,12 @@ export function Chart({ campaign, ledger, now, raised, backers, live }: { campai
             {/* Under the pace line's end: the line's height at the label's left edge (about 88 px in), plus a line of type. */}
             {taking ? (
               <text className="c-label" x={box.w - 4} y={paceLabelY} textAnchor="end">
-                PACE NEEDED
+                Pace needed
               </text>
             ) : null}
             <line className="c-target" x1={0} x2={box.w} y1={p.targetY} y2={p.targetY} />
             <text className="c-label" x={box.w} y={-8} textAnchor="end">
-              TARGET {formatUsd(v.target)}
+              Target {formatUsd(v.target)}
             </text>
             {taking ? <line className="c-now" x1={p.nowX} x2={p.nowX} y1={p.band && p.band.w > 70 ? 24 : 0} y2={box.h} /> : null}
             {before ? <path className="c-climb" d={before} /> : null}

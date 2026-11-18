@@ -17,6 +17,8 @@ import { Lost } from "../pages/Lost.tsx";
 import { Mine } from "../pages/Mine.tsx";
 import { Pledge } from "../pages/Pledge.tsx";
 import { Proof } from "../pages/Proof.tsx";
+import { scrollToSection } from "../ui/motion.ts";
+import { explorerLink } from "../views/links.ts";
 import { fallbackLine, relayLine, relayRefusedBeforeSending } from "../views/pledge.ts";
 import { shell, stepLine, WORDS } from "../views/shell.ts";
 import { connect as askWallet, connected, declined, discover, ensureChain, type FoundWallet } from "../wallet/injected.ts";
@@ -24,7 +26,7 @@ import { chainOf } from "./chain.ts";
 import type { Config } from "./config.ts";
 import type { Ctx, RelayOutcome, SendState, SignedGuard } from "./context.ts";
 import { startPoll, type Poll, type PollHost } from "./poll.ts";
-import { routeOf, type Route } from "./route.ts";
+import { hrefFor, routeOf, type Route } from "./route.ts";
 import { readWorld, type World } from "./world.ts";
 
 const EVERY_MS = 4000;
@@ -340,9 +342,41 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
     [client, config],
   );
 
+  // The bar draws its rule once the page has moved under it.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // A link to a part of the landing page: go there if elsewhere, then bring that part into view.
+  // A new page otherwise starts at its top.
+  const wanted = useRef<"how" | "ledger" | null>(null);
+  const toSection = (e: { preventDefault(): void }, section: "how" | "ledger") => {
+    e.preventDefault();
+    if (route.page === "home") return scrollToSection(section);
+    wanted.current = section;
+    window.location.hash = hrefFor({ page: "home" });
+  };
+  const landed = route.page === "home" && world !== null;
+  useEffect(() => {
+    const section = wanted.current;
+    if (section !== null) {
+      if (!landed) return; // the landing page has not been drawn yet
+      wanted.current = null;
+      const frameId = window.requestAnimationFrame(() => scrollToSection(section));
+      return () => window.cancelAnimationFrame(frameId);
+    }
+    if (route.page === "pledge") return; // that address puts the cursor in the amount field; the browser has brought it into view
+    window.scrollTo(0, 0);
+  }, [hrefFor(route), landed]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const frame = shell({
     route,
     chain: config.chain,
+    contractLink: explorerLink(config.chain.explorer, "address", config.boomerang),
     wallets: wallets.length,
     account,
     walletChainId,
@@ -388,31 +422,33 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
 
   return (
     <div className="app">
-      <header className="top">
-        <div className="top-row">
-          <a className="brand" href="#/">
+      <nav className={`top${scrolled ? " scrolled" : ""}`} aria-label={frame.brand}>
+        <div className="wrap">
+          <a className="mark" href="#/">
+            <svg viewBox="0 0 32 32" aria-hidden="true">
+              <path d="M5 22 Q9 8 16 8 Q23 8 27 22 Q28.5 25 26 25.6 Q21 15 16 15 Q11 15 6 25.6 Q3.5 25 5 22Z" fill="currentColor" />
+            </svg>
             {frame.brand}
           </a>
-          <nav aria-label={frame.brand}>
+          <div className="links">
             {frame.nav.map((n) => (
-              <a key={n.href} href={n.href} aria-current={n.current ? "page" : undefined}>
+              <a key={n.label} href={n.href} aria-current={n.current ? "page" : undefined} onClick={n.section ? (e) => toSection(e, n.section!) : undefined}>
                 {n.label}
               </a>
             ))}
-          </nav>
+          </div>
           <div className={`wallet wallet-${frame.wallet.state}`}>
             {frame.wallet.account ? <span className="wallet-account">{frame.wallet.account}</span> : null}
             {frame.wallet.button ? (
-              <button type="button" onClick={frame.wallet.state === "wrong-network" ? () => void switchNetwork() : connect}>
+              <button type="button" className="btn btn-line" onClick={frame.wallet.state === "wrong-network" ? () => void switchNetwork() : connect}>
                 {frame.wallet.button}
               </button>
             ) : null}
           </div>
         </div>
-        <div className="top-lines">
-          <p className="tagline">{frame.tagline}</p>
-          <p className="network">{frame.network}</p>
-        </div>
+      </nav>
+
+      <div className="wrap notices">
         {frame.wallet.note ? <p className="wallet-note">{frame.wallet.note}</p> : null}
         {walletError ? (
           <p className="problem" role="alert">
@@ -438,22 +474,42 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
                 </li>
               ))}
             </ul>
-            <button type="button" className="plain" onClick={() => setChoosing(false)}>
+            <button type="button" className="btn-plain" onClick={() => setChoosing(false)}>
               {WORDS.wallets.cancel}
             </button>
           </div>
         ) : null}
-      </header>
+        {frame.banner ? (
+          <p className="banner" role="alert">
+            {frame.banner}
+          </p>
+        ) : null}
+      </div>
 
-      {frame.banner ? (
-        <p className="banner" role="alert">
-          {frame.banner}
-        </p>
-      ) : null}
+      {/* The landing page lays out its own full-width sections; every other page sits in the gutter. */}
+      {route.page === "home" && world !== null ? <main>{page}</main> : <main className="wrap page">{page}</main>}
 
-      <main>{page}</main>
-
-      <footer className="foot">{frame.asOf ? <p>{frame.asOf}</p> : null}</footer>
+      <footer className="foot">
+        <div className="wrap">
+          <div>
+            <p className="disclaimer">{frame.disclaimer}</p>
+            {frame.asOf ? <p className="as-of">{frame.asOf}</p> : null}
+          </div>
+          <div className="fl">
+            {frame.foot.map((f) =>
+              f.external ? (
+                <a key={f.label} href={f.href} target="_blank" rel="noreferrer noopener">
+                  {f.label}
+                </a>
+              ) : (
+                <a key={f.label} href={f.href}>
+                  {f.label}
+                </a>
+              ),
+            )}
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

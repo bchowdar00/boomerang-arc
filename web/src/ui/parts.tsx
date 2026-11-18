@@ -73,7 +73,7 @@ export function Feed({ feed, explorer, ago }: { feed: FeedView; explorer: string
         return (
           <li key={l.key}>
             <span className="feed-text">{early ? l.text.slice(0, -EARLY.length) : l.text}</span>
-            {early ? <span className="feed-early">EARLY</span> : null}
+            {early ? <span className="feed-early">early</span> : null}
             {l.when ? (
               <time className="feed-when" title={l.when}>
                 {ago?.get(l.key) ?? l.when}

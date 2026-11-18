@@ -179,7 +179,7 @@ describe("the Campaign page", function () {
     const labels = [{ id: 7n, sponsor: SPONSOR, recipient: RECIPIENT, title: "Send twelve of us to the regional.", by: "Westbrook Robotics Club", sponsorName: "Alumni fund", about: "", example: true }];
     assert.equal(campaignPage({ campaign: campaign(), labels, desk: null, now: OPENS, block: 1n }).name.title, "Send twelve of us to the regional.");
     assert.equal(campaignPage({ campaign: campaign({}, { sponsor: ME }), labels, desk: null, now: OPENS, block: 1n }).name.title, "Campaign 7");
-    assert.equal(campaignPage({ campaign: campaign(), labels: [], desk: SPONSOR, now: OPENS, block: 1n }).name.title, "Ten-minute demo campaign 7");
+    assert.equal(campaignPage({ campaign: campaign(), labels: [], desk: SPONSOR, now: OPENS, block: 1n }).name.title, "Ten-minute campaign 7");
   });
 
   it("view.lost: a number the contract does not have, and an address the app does not know, each get a plain page", function () {
@@ -248,6 +248,10 @@ describe("the Pledge page", function () {
     assert.deepEqual(ready.blocks, []);
     assert.equal(ready.source, "contract");
     assert.equal(ready.button, "Pledge 25.00 USDC");
+    // With one signature the cheque's button is made from this one, so the two can never drift apart.
+    assert.equal(signedButton(ready.button), "Sign and pledge 25.00 USDC");
+    assert.equal(signedButton("Pledge"), "Sign and pledge");
+    assert.equal(signedButton("Connect a wallet"), "Connect a wallet");
     assert.equal(ready.line, local.line);
     assert.match(ready.line, /^If this misses: you get back 25\.00 plus about \d+\.\d\d\.$/);
     assert.deepEqual(ready.calls.map((c) => [c.functionName, c.args]), [["approve", [BOOMERANG, usd(25)]], ["pledge", [7n, usd(25)]]]);
@@ -384,7 +388,7 @@ describe("the Home page", function () {
   it("with no campaigns it says so, and offers the ten-minute demo only where a desk exists", function () {
     const none = homePage({ campaigns: [], labels: [], desk: SPONSOR, now: OPENS, block: 1n });
     assert.equal(none.empty, "No campaign has been created yet.");
-    assert.equal(none.demo?.button, "Try a ten-minute campaign");
+    assert.equal(none.demo?.button, "Start a ten-minute campaign");
     assert.deepEqual(none.totals.map((t) => t.value), ["0", "0", "0.00 USDC", "0.00 USDC", "0.00 USDC"]);
   });
 });
@@ -636,7 +640,7 @@ describe("the Proof page", function () {
 });
 
 // The frame around every page.
-import { deskOffer, shell, stepLine } from "../src/views/shell.ts";
+import { deskOffer, shell, signedButton, stepLine } from "../src/views/shell.ts";
 
 describe("the frame around every page", function () {
   const arc = { id: 5042002, name: "Arc Testnet", local: false };
@@ -645,19 +649,27 @@ describe("the frame around every page", function () {
   it("view.shell: the name, the network, the links with the current one marked, and the block", function () {
     const s = shell(base);
     assert.equal(s.brand, "Boomerang");
-    assert.equal(s.network, "Arc Testnet. Test USDC only: no real money is involved.");
+    assert.equal(s.disclaimer, "Boomerang runs on Arc Testnet with test USDC. No real money is involved, nothing here is an offer or financial advice, and the contract has not been audited.");
+    // The first two links go to parts of the landing page; on that page itself neither is marked.
     assert.deepEqual(s.nav, [
-      { href: "#/", label: "Campaigns", current: true },
-      { href: "#/mine", label: "My money", current: false },
-      { href: "#/proof", label: "Proof", current: false },
+      { href: "#/", label: "How it works", current: false, section: "how" },
+      { href: "#/", label: "Campaigns", current: false, section: "ledger" },
+      { href: "#/mine", label: "My money", current: false, section: null },
+      { href: "#/proof", label: "Proof", current: false, section: null },
     ]);
+    // The foot links to the code and to Proof, and to the contract on the explorer when the chain has one.
+    assert.deepEqual(s.foot.map((f) => f.label), ["GitHub", "Proof"]);
+    assert.deepEqual(
+      shell({ ...base, contractLink: "https://explorer.example/address/0x1" }).foot.map((f) => [f.label, f.external]),
+      [["GitHub", true], ["Explorer", true], ["Proof", false]],
+    );
     assert.equal(s.asOf, "As of block 400");
     assert.equal(s.banner, null);
     // A campaign and its pledge form sit under Campaigns; a lost address is under nothing.
-    assert.deepEqual(shell({ ...base, route: { page: "pledge", id: 7n } }).nav.map((n) => n.current), [true, false, false]);
-    assert.deepEqual(shell({ ...base, route: { page: "proof" } }).nav.map((n) => n.current), [false, false, true]);
-    assert.deepEqual(shell({ ...base, route: { page: "lost", hash: "#/x" } }).nav.map((n) => n.current), [false, false, false]);
-    assert.equal(shell({ ...base, chain: { id: 31337, name: "Local chain 31337", local: true } }).network, "Local chain 31337, a test chain on this machine");
+    assert.deepEqual(shell({ ...base, route: { page: "pledge", id: 7n } }).nav.map((n) => n.current), [false, true, false, false]);
+    assert.deepEqual(shell({ ...base, route: { page: "proof" } }).nav.map((n) => n.current), [false, false, false, true]);
+    assert.deepEqual(shell({ ...base, route: { page: "lost", hash: "#/x" } }).nav.map((n) => n.current), [false, false, false, false]);
+    assert.equal(shell({ ...base, chain: { id: 31337, name: "Local chain 31337", local: true } }).disclaimer, "Local chain 31337, a test chain on this machine.");
   });
 
   it("view.wallet: no wallet, one to connect, one on the wrong network, one ready", function () {
@@ -687,7 +699,7 @@ describe("the frame around every page", function () {
   it("the desk's offer and the steps of a send", function () {
     assert.equal(deskOffer({ desk: null, account: ME }), null);
     assert.equal(deskOffer({ desk: SPONSOR, account: null }), null);
-    assert.deepEqual(deskOffer({ desk: SPONSOR, account: ME }), { button: "Get 2.00 test USDC", note: "From this site's demo desk, once per address. Circle's faucet for Arc Testnet gives more." });
+    assert.deepEqual(deskOffer({ desk: SPONSOR, account: ME }), { button: "Get 2.00 USDC", note: "From this site's desk, once per address. Circle's faucet for Arc Testnet gives more." });
     assert.equal(stepLine({ index: 0, label: "Allow the contract to take 25.00 USDC", state: "asking" }, 2), "Step 1 of 2: Allow the contract to take 25.00 USDC. Confirm it in your wallet.");
     assert.equal(stepLine({ index: 1, label: "Pledge 25.00 USDC", state: "sent" }, 2), "Step 2 of 2: Pledge 25.00 USDC. Sent; waiting for the chain.");
     assert.equal(stepLine({ index: 0, label: "Settle campaign 7", state: "done" }, 1), "Settle campaign 7. Done.");

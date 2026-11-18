@@ -6,5 +6,8 @@ dist/
 .env.*
 *.log
 .DS_Store
-data/
+# The keeper's working folder (KEEPER_DATA, by default ./data where it is started). Anchored, so
+# it never hides source folders such as web/src/data.
+/data/
+/services/keeper/data/
 *.tmp

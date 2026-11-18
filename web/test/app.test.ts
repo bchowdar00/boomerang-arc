@@ -208,7 +208,7 @@ describe("campaign names", function () {
     const plain = nameOf([], campaign(9n));
     assert.deepEqual(plain, { title: "Campaign 9", by: "Paid to 0x0000…00aa", sponsorName: "0x0000…00b1", about: "", example: false, labelled: false });
     const demo = nameOf([], campaign(10n, DESK), DESK.toUpperCase().replace("0X", "0x") as `0x${string}`);
-    assert.equal(demo.title, "Ten-minute demo campaign 10");
+    assert.equal(demo.title, "Ten-minute campaign 10");
     assert.equal(demo.example, true);
     assert.equal(nameOf([], campaign(10n, DESK), null).title, "Campaign 10");
   });

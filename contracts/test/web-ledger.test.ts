@@ -204,7 +204,7 @@ describe("the app's reader of the keeper's ledger", function () {
     // The page says what the desk gives and how long its campaign runs; both are the desk's constants.
     const answer = (body: unknown): Fetch => async () => ({ status: 200, json: async () => body });
     const gave = await askForUsdc({ url: "https://keeper.example", fetch: answer({ ok: true }), address: w.alice.account.address });
-    assert.equal(gave.line, `The desk sent ${formatUsd(DEMO.usdc)} test USDC to your address.`);
+    assert.equal(gave.line, `The desk sent ${formatUsd(DEMO.usdc)} USDC to your address.`);
     const opened = await askForCampaign({ url: "https://keeper.example", fetch: answer({ ok: true, id: "3" }) });
     assert.equal(DEMO.opensIn, 60n);
     assert.equal(DEMO.opensIn + DEMO.openFor, 660n);

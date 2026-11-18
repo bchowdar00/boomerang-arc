@@ -2,11 +2,11 @@ import type { Ctx } from "../app/context.ts";
 import { hrefFor } from "../app/route.ts";
 import { campaignIn } from "../app/world.ts";
 import { finalizeCall } from "../flows/calls.ts";
-import { Band } from "../ui/Board.tsx";
+import { Band, OutcomeStamp } from "../ui/Board.tsx";
 import { Chart } from "../ui/Chart.tsx";
+import { Cheque } from "../ui/Cheque.tsx";
 import { Feed, Rows, Section, SendStatus } from "../ui/parts.tsx";
-import { PledgeBox } from "../ui/PledgeBox.tsx";
-import { agoOf, settledLine } from "../views/board.ts";
+import { agoOf, boardView, settledLine } from "../views/board.ts";
 import { campaignPage, noSuchCampaign } from "../views/campaign.ts";
 import { feedView } from "../views/feed.ts";
 import { WORDS } from "../views/shell.ts";
@@ -14,7 +14,7 @@ import { WORDS } from "../views/shell.ts";
 export function Missing({ ctx, id }: { ctx: Ctx; id: bigint }) {
   const page = noSuchCampaign(id, ctx.world.count);
   return (
-    <section>
+    <section className="lost">
       <h1>{page.title}</h1>
       <p>{page.line}</p>
       <p>
@@ -30,11 +30,16 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
   const campaign = campaignIn(world, id);
   if (!campaign) return <Missing ctx={ctx} id={id} />;
   const page = campaignPage({ campaign, labels: ctx.labels, desk: config.desk, now: world.now, block: world.block });
+  const board = boardView({ campaign, now: world.now });
   const ledger = world.keeper.up ? world.keeper.ledger : null;
   const feed = feedView({ ledger, campaign: id, limit: 4 });
   const key = `settle:${id}`;
   const sending = ctx.sendState(key);
   const taking = page.phase === "early" || page.phase === "open" || page.phase === "waiting";
+  const live = page.phase === "early" || page.phase === "open";
+  const settled = settledLine(campaign);
+  // The stamp lands only once the outcome is final; a campaign still waiting to be settled shows none.
+  const showStamp = board.result !== null && !page.settle;
 
   return (
     <article className={`campaign phase-${page.phase}`}>
@@ -50,21 +55,26 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
         {page.name.example ? <p className="tag">{page.name.labelled ? WORDS.campaign.example : WORDS.campaign.demo}</p> : null}
       </header>
 
-      <div className="board">
-        <Band campaign={campaign} now={world.now} />
-        <div className="board-body">
-          <Chart campaign={campaign} ledger={ledger} now={world.now} raised={page.raised} backers={page.backers} live={page.phase === "early" || page.phase === "open"} />
+      <div className="camp-body">
+        <div className="camp-main">
+          <Band campaign={campaign} now={world.now} />
+          <div className="camp-chart">
+            <Chart campaign={campaign} ledger={ledger} now={world.now} raised={page.raised} backers={page.backers} live={live} />
+          </div>
+        </div>
+        <div className="camp-side">
           {taking ? (
-            <PledgeBox ctx={ctx} campaign={campaign} focus={focus} />
+            <Cheque ctx={ctx} campaign={campaign} focus={focus} />
           ) : (
-            <section className="receipt">
-              <p className="receipt-status">{page.status}</p>
-              {settledLine(campaign) ? <p className="receipt-one">{settledLine(campaign)}</p> : null}
-              <p className="receipt-line">{page.promise}</p>
+            <section className="voucher">
+              {showStamp && board.result ? <OutcomeStamp result={board.result} /> : null}
+              <p className="voucher-status">{page.status}</p>
+              {settled ? <p className="voucher-figure">{settled}</p> : null}
+              <p className="voucher-promise">{page.promise}</p>
               {page.settle ? (
                 <div className="settle">
                   {ctx.account ? (
-                    <button type="button" className="go" disabled={!ctx.maySend} onClick={() => void ctx.send(key, [finalizeCall({ boomerang: config.boomerang, id })])}>
+                    <button type="button" className="btn btn-ink" disabled={!ctx.maySend} onClick={() => void ctx.send(key, [finalizeCall({ boomerang: config.boomerang, id })])}>
                       {page.settle.button}
                     </button>
                   ) : null}
@@ -79,7 +89,7 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
         </div>
       </div>
 
-      {taking ? <p className="rule">{page.promise}</p> : null}
+      {taking ? <p className="promise">{page.promise}</p> : null}
 
       <div className="under">
         <Section title={WORDS.campaign.feed}>

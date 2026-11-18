@@ -61,7 +61,7 @@ export function homePage(o: { campaigns: readonly CampaignView[]; labels: readon
     running,
     settled,
     empty: o.campaigns.length === 0 ? "No campaign has been created yet." : null,
-    demo: o.desk === null ? null : { button: "Try a ten-minute campaign", note: "Opens a small campaign with test money that runs and settles in about ten minutes. You can pledge to it and watch the money come back." },
+    demo: o.desk === null ? null : { button: "Start a ten-minute campaign", note: "Opens a small campaign that runs and settles in about ten minutes. You can pledge to it and watch the money come back." },
     asOf: `As of block ${o.block}`,
   };
 }
