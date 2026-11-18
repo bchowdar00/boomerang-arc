@@ -35,7 +35,7 @@ const state = (over: Partial<State> = {}): State => ({
   backers: 31, pledged: usd(1240), pledgedEarly: usd(1240), weighted: usd(1240) * 1_000_000n, bonusPaid: 0n, ...over,
 });
 const campaign = (t: Partial<Terms> = {}, s: Partial<State> = {}, id = 7n): CampaignView => ({ id, terms: terms(t), state: state(s), outcomeNow: 0 });
-const page = (c: CampaignView, keeperUp = true, now = AFTER) => campaignPage({ campaign: c, labels: [], desk: null, now, block: 99n, keeperUp });
+const page = (c: CampaignView, pace: "prompt" | "behind" | "down" = "prompt", now = AFTER) => campaignPage({ campaign: c, labels: [], desk: null, now, block: 99n, pace });
 
 describe("what a settled campaign still owes, and who can send it", function () {
   it("dues.funded: the recipient and the unused bonus, each with a button anyone may press", function () {
@@ -66,7 +66,7 @@ describe("what a settled campaign still owes, and who can send it", function () 
   });
 
   it("dues.none: nothing while it is open, nothing once the contract's flags say paid, nothing for a pot never locked or of zero", function () {
-    assert.deepEqual(page(campaign(), true, OPENS + DAY).dues, []);
+    assert.deepEqual(page(campaign(), "prompt", OPENS + DAY).dues, []);
     assert.deepEqual(page(campaign({}, { outcome: Outcome.Funded, pledged: usd(2000), recipientPaid: true, bonusReturned: true })).dues, []);
     assert.deepEqual(page(campaign({}, { outcome: Outcome.Missed, matchReturned: true, bonusReturned: true })).dues, []);
     assert.deepEqual(page(campaign({}, { outcome: Outcome.Void, matchIn: false, bonusIn: false })).dues, []);
@@ -75,9 +75,9 @@ describe("what a settled campaign still owes, and who can send it", function () 
   });
 
   it("dues.keeperDown: no sentence promises the keeper while it is not answering", function () {
-    const due = page(campaign({}, { outcome: Outcome.Funded, pledged: usd(2000) }), false);
+    const due = page(campaign({}, { outcome: Outcome.Funded, pledged: usd(2000) }), "down");
     assert.equal(due.duesNote, "Anyone can send these, and each can only pay the address the contract names. The keeper is not answering right now, so they wait for someone to press them.");
-    const ended = page(campaign(), false);
+    const ended = page(campaign(), "down");
     assert.deepEqual(ended.settle, { button: "Settle this campaign", note: "Anyone can do this, and it can only do what the rules say. The keeper is not answering right now, so it waits for someone to press this." });
     const mine: MyPledge = {
       campaign: campaign({}, { outcome: Outcome.Missed, bonusPaid: usd(62) }, 3n),
@@ -85,8 +85,33 @@ describe("what a settled campaign still owes, and who can send it", function () 
       owed: { principal: usd(124), bonus: usd(6.2) },
       ifMissed: { principal: 0n, bonus: 0n },
     };
-    const my = minePage({ account: ME, mine: [mine], labels: [], desk: null, block: 9n, keeperUp: false });
+    const my = minePage({ account: ME, mine: [mine], labels: [], desk: null, block: 9n, pace: "down" });
     assert.equal(my.rows[0].send?.note, "Anyone can send this, and it can only pay the backer's own refund address. The keeper is not answering right now, so it waits for someone to press it.");
+  });
+
+  it("campaign.behind: a keeper behind the chain waits to be pressed, in each of the three sentences", function () {
+    const settle = page(campaign(), "behind");
+    assert.deepEqual(settle.settle, {
+      button: "Settle this campaign",
+      note: "Anyone can do this, and it can only do what the rules say. The keeper is behind the chain right now, so it waits for someone to press this.",
+    });
+    const dues = page(campaign({}, { outcome: Outcome.Funded, pledged: usd(2000) }), "behind");
+    assert.equal(dues.duesNote, "Anyone can send these, and each can only pay the address the contract names. The keeper is behind the chain right now, so they wait for someone to press them.");
+    const missed = page(campaign({}, { outcome: Outcome.Missed, bonusPaid: usd(62) }), "behind");
+    assert.equal(missed.refunds, "A backer can send their own refund from this page with their wallet connected. The keeper is behind the chain right now, so it may not send it first.");
+  });
+
+  it("mine.behind: both send-note forms say the keeper is behind the chain", function () {
+    const mine: MyPledge = {
+      campaign: campaign({}, { outcome: Outcome.Missed, bonusPaid: usd(62) }, 3n),
+      backer: { principal: usd(124), weighted: usd(124) * 1_000_000n, payTo: ZERO, paid: false },
+      owed: { principal: usd(124), bonus: usd(6.2) },
+      ifMissed: { principal: 0n, bonus: 0n },
+    };
+    const own = minePage({ account: ME, mine: [mine], labels: [], desk: null, block: 9n, pace: "behind" });
+    assert.equal(own.rows[0].send?.note, "Anyone can send this, and it can only pay the backer's own refund address. The keeper is behind the chain right now, so it waits for someone to press it.");
+    const other = minePage({ account: ME, mine: [mine], labels: [], desk: null, block: 9n, pace: "behind", whose: "other" });
+    assert.equal(other.rows[0].send?.note, "Anyone can send this, and it can only pay this backer's refund address. The keeper is behind the chain right now, so it waits for someone to press it.");
   });
 
   it("dues.call: the call is paySide with the side's number", function () {
@@ -101,7 +126,7 @@ describe("what a settled campaign still owes, and who can send it", function () 
 
   it("after settling, a backer is pointed to their refund", function () {
     assert.equal(page(campaign({}, { outcome: Outcome.Missed, bonusPaid: usd(62) })).refunds, "A backer can send their own refund from this page with their wallet connected. The keeper usually sends it first, within seconds.");
-    assert.equal(page(campaign({}, { outcome: Outcome.Missed, bonusPaid: usd(62) }), false).refunds, "A backer can send their own refund from this page with their wallet connected. The keeper is not answering right now.");
+    assert.equal(page(campaign({}, { outcome: Outcome.Missed, bonusPaid: usd(62) }), "down").refunds, "A backer can send their own refund from this page with their wallet connected. The keeper is not answering right now.");
     assert.equal(page(campaign({}, { outcome: Outcome.Funded, pledged: usd(2000) })).refunds, null);
   });
 });

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { clientFor } from "../app/chain.ts";
 import type { Config } from "../app/config.ts";
 import type { Ctx } from "../app/context.ts";
+import { paceOf } from "../data/pace.ts";
 import { Rows, Section } from "../ui/parts.tsx";
 import { checksView, type ChecksState } from "../views/checks.ts";
 import { proofPage } from "../views/proof.ts";
@@ -121,6 +122,7 @@ export function Proof({ ctx }: { ctx: Ctx }) {
     labels: ctx.labels,
     desk: config.desk,
     now: world.now,
+    pace: paceOf(world.keeper, world.block),
   });
 
   return (

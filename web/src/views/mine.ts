@@ -1,6 +1,7 @@
 // "My money": each pledge the connected account has made, and where it stands.
 import type { Address } from "../../../packages/kit/src/index.ts";
 import { hrefFor } from "../app/route.ts";
+import type { PaceState } from "../data/pace.ts";
 import { standingOf } from "../data/campaign.ts";
 import { short } from "../data/keeper.ts";
 import { nameOf, type Label } from "../data/labels.ts";
@@ -65,8 +66,8 @@ export function minePage(o: {
   labels: readonly Label[];
   desk: Address | null;
   block: bigint;
-  /** Whether the keeper answered at this read. When it did not, no sentence says it is about to act. */
-  keeperUp?: boolean;
+  /** How the keeper stands against the chain at this read. Only when it is prompt does a sentence say it is about to act. */
+  pace?: PaceState;
   /** Whether this browser has any wallet at all. */
   hasWallet?: boolean;
   /** How many campaigns the contract has and how many of the newest this page read; pledges are looked for only in those. */
@@ -88,7 +89,12 @@ export function minePage(o: {
       : o.whose === "example"
         ? { tag: "An example", address: o.account, note: "A real backer on this contract, shown so the page is not empty. Connect a wallet to see your own money, or look any address up." }
         : { tag: null, address: o.account, note: null };
-  const soon = (o.keeperUp ?? true) ? "The keeper usually does it within seconds." : "The keeper is not answering right now, so it waits for someone to press it.";
+  const MINE_SOON: Record<PaceState, string> = {
+    prompt: "The keeper usually does it within seconds.",
+    behind: "The keeper is behind the chain right now, so it waits for someone to press it.",
+    down: "The keeper is not answering right now, so it waits for someone to press it.",
+  };
+  const soon = MINE_SOON[o.pace ?? "prompt"];
   const sendNote = third
     ? `Anyone can send this, and it can only pay this backer's refund address. ${soon}`
     : `Anyone can send this, and it can only pay the backer's own refund address. ${soon}`;

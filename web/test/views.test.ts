@@ -487,6 +487,29 @@ describe("the keeper's health", function () {
     assert.equal(readHealth({ ...wire, lastErrors: ["a\u0085b\u007fc"] }).lastErrors[0], "a b c");
   });
 
+  it("health.old: a keeper that sends neither streamBlock nor node reads both as null, the rest as before", function () {
+    const h = readHealth(wire);
+    assert.equal(h.streamBlock, null);
+    assert.equal(h.node, null);
+    assert.equal(h.lastBlock, 400);
+    assert.equal(h.deliveries, 9);
+  });
+
+  it("health.node: the two new fields are read when the keeper sends them", function () {
+    const h = readHealth({ ...wire, streamBlock: 402, node: { following: true, reads: 12, lastReadAt: 1_794_000_006_000, readTo: 405, faults: 1 } });
+    assert.equal(h.streamBlock, 402);
+    assert.deepEqual(h.node, { following: true, reads: 12, lastReadAt: 1_794_000_006_000, readTo: 405, faults: 1 });
+    // null reads of its nullable fields are kept.
+    assert.deepEqual(readHealth({ ...wire, streamBlock: null, node: { following: false, reads: 0, lastReadAt: null, readTo: null, faults: 0 } }).node, {
+      following: false, reads: 0, lastReadAt: null, readTo: null, faults: 0,
+    });
+  });
+
+  it("health.node.odd: a node with a non-number count or no following throws, naming the field", function () {
+    assert.throws(() => readHealth({ ...wire, node: { following: true, reads: "3", lastReadAt: null, readTo: null, faults: 0 } }), /at node\.reads/);
+    assert.throws(() => readHealth({ ...wire, node: { reads: 3, lastReadAt: null, readTo: null, faults: 0 } }), /at node\.following/);
+  });
+
   it("health.absent: campaign numbers the contract says it does not have, none when the keeper sends no list", function () {
     assert.deepEqual(readHealth(wire).absent, []);
     assert.deepEqual(readHealth({ ...wire, absent: ["7", "9"] }).absent, [7n, 9n]);
@@ -514,16 +537,17 @@ describe("the Proof page", function () {
     backers: Array.from({ length: 31 }, (_, i) => ({ address: `0x${(i + 1).toString(16).padStart(40, "0")}` as typeof ME, principal: usd(40), weighted: usd(40) * 1_000_000n, payTo: null, paid: false, paidPrincipal: 0n, paidBonus: 0n })),
   };
   const ledger = (over: Partial<LedgerView> = {}): LedgerView => ({ lastSeq: 12n, totalOwed: usd(1740), missing: null, campaigns: [inLedger], feed: [], ...over });
-  const health = readHealth({
+  const healthWire = {
     lastSeq: "12", missing: null, pending: 0, repeats: 3, lastBlock: 400, lastTime: "1794000000", lastDeliveryAt: 1_794_000_005_000, lastBeatBlock: 300,
     kvError: null, deliveries: 9, sent: 4, failedSends: 1, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
-  });
+  };
+  const health = readHealth(healthWire);
   const ZERO = "0x0000000000000000000000000000000000000000" as const;
   // The contract's own backer records at the block, matching the ledger's records unless a test changes one.
   const checksFor = (lc: LedgerCampaignView, over: (b: LedgerBackerView) => Partial<Backer> = () => ({})): BackerCheck[] =>
     lc.backers.map((b) => ({ id: lc.id, address: b.address, chain: { principal: b.principal, weighted: b.weighted, payTo: b.payTo ?? ZERO, paid: b.paid, ...over(b) } }));
   const page = (over: Partial<Parameters<typeof proofPage>[0]> = {}) =>
-    proofPage({ custody, campaigns: [chain], count: 1n, ledger: ledger(), health, backerChecks: checksFor(inLedger), backerTotal: inLedger.backers.length, where, ...over });
+    proofPage({ custody, campaigns: [chain], count: 1n, ledger: ledger(), health, backerChecks: checksFor(inLedger), backerTotal: inLedger.backers.length, where, pace: { state: "prompt", by: "stream" }, ...over });
 
   it("view.proof: holds against owes at one block, the second ledger in agreement, and the Stream's pulse", function () {
     const p = page();
@@ -534,14 +558,15 @@ describe("the Proof page", function () {
     });
     assert.deepEqual(p.second, {
       state: "agrees",
-      line: "A second ledger, rebuilt only from the contract's 12 events as the Stream delivered them, agrees with the contract at block 400 on every figure of its one campaign and on 31 backer records.",
+      line: "A second ledger, rebuilt only from the contract's 12 events as the keeper received them, agrees with the contract at block 400 on every figure of its one campaign and on 31 backer records.",
       differences: [],
     });
     assert.deepEqual(p.stream, [
-      { label: "Deliveries taken since the keeper started", value: "9" },
-      { label: "Last delivery", value: "6 Nov 2026, 21:20 UTC" },
-      { label: "Newest block delivered", value: "400" },
-      { label: "Last heartbeat", value: "Block 300" },
+      { label: "Fed by", value: "The QuickNode Stream" },
+      { label: "Newest block heard", value: "400" },
+      { label: "Stream deliveries taken since the keeper started", value: "9" },
+      { label: "Last Stream delivery", value: "6 Nov 2026, 21:20 UTC" },
+      { label: "Last Stream heartbeat", value: "Block 300" },
       { label: "Events missing", value: "None" },
       { label: "Events set aside as not fitting", value: "0" },
       { label: "Campaigns in the events that the contract does not have (or not yet)", value: "None" },
@@ -554,7 +579,62 @@ describe("the Proof page", function () {
     // Runnable by someone who has only this page: fetch the code, install, then the one script that builds and checks.
     assert.deepEqual(p.yourself.commands, ["git clone https://github.com/bchowdar00/boomerang-arc", "cd boomerang-arc", "npm ci", "npm run verify"]);
     assert.deepEqual(p.limits, [...LIMITS]);
+    assert.equal(
+      LIMITS[2],
+      "The keeper makes payouts prompt; it is not needed for them. When it is off or behind the chain nothing is lost, only later: from this site anyone can settle a campaign, pay its recipient and return the pots that were not paid out, and a backer can send their own refund from the campaign's page or from My money. Anyone can send someone else's refund as well: look the backer's address up under My money.",
+    );
     assert.ok(LIMITS.length >= 5);
+  });
+
+  it("proof.fedBy: how the keeper is fed, the renamed labels, and the node-reads row", function () {
+    const node = { following: true, reads: 12, lastReadAt: 1_794_000_006_000, readTo: 405, faults: 0 };
+    const nodeHealth = readHealth({ ...healthWire, node });
+    const v = (p: ReturnType<typeof page>, label: string) => p.stream!.find((r) => r.label === label)!.value;
+
+    // The five "Fed by" values.
+    assert.equal(v(page({ pace: { state: "prompt", by: "stream" } }), "Fed by"), "The QuickNode Stream");
+    assert.equal(
+      v(page({ pace: { state: "prompt", by: "node" }, health: readHealth({ ...healthWire, lastDeliveryAt: null, node }) }), "Fed by"),
+      "Arc's node, read by the keeper itself. The Stream has delivered nothing since the keeper started.",
+    );
+    assert.equal(
+      v(page({ pace: { state: "prompt", by: "node" }, health: nodeHealth }), "Fed by"),
+      "Arc's node, read by the keeper itself. The Stream's last delivery was 6 Nov 2026, 21:20 UTC.",
+    );
+    assert.equal(v(page({ pace: { state: "behind", heard: 0, blocks: 901 } }), "Fed by"), "Nothing yet. The keeper has heard no block since it started.");
+    assert.equal(v(page({ pace: { state: "behind", heard: 400, blocks: 950 } }), "Fed by"), "Nothing right now. The keeper last heard block 400, 950 blocks behind the chain.");
+
+    // The renamed labels carry the same values as before.
+    const p = page();
+    assert.equal(v(p, "Newest block heard"), "400");
+    assert.equal(v(p, "Stream deliveries taken since the keeper started"), "9");
+    assert.equal(v(p, "Last Stream delivery"), "6 Nov 2026, 21:20 UTC");
+    assert.equal(v(p, "Last Stream heartbeat"), "Block 300");
+
+    // The node-reads row shows only when the keeper reads the node, in both of its forms.
+    assert.equal(p.stream!.some((r) => r.label === "Node reads since the keeper started"), false);
+    assert.equal(v(page({ health: nodeHealth }), "Node reads since the keeper started"), "12");
+    assert.equal(
+      v(page({ health: readHealth({ ...healthWire, node: { ...node, faults: 2 } }) }), "Node reads since the keeper started"),
+      "12, and 2 that failed",
+    );
+
+    // Row order, with the node present.
+    assert.deepEqual(page({ health: nodeHealth }).stream!.map((r) => r.label), [
+      "Fed by",
+      "Newest block heard",
+      "Stream deliveries taken since the keeper started",
+      "Last Stream delivery",
+      "Last Stream heartbeat",
+      "Node reads since the keeper started",
+      "Events missing",
+      "Events set aside as not fitting",
+      "Campaigns in the events that the contract does not have (or not yet)",
+      "Calls sent",
+      "Calls given up on",
+      "Stream store",
+      "Every settled campaign fully paid, by the keeper's ledger",
+    ]);
   });
 
   it("a contract short of what it owes is said in so many words", function () {
@@ -577,7 +657,7 @@ describe("the Proof page", function () {
     // Late for good: a hole in the events means waiting will not help, and the page says so.
     const holed = page({ ledger: ledger({ lastSeq: 9n, missing: { from: 10n, to: 11n } }) });
     assert.equal(holed.second.state, "behind");
-    assert.equal(holed.second.line, "The keeper's ledger is 3 events behind the contract, and events 10 to 11 never reached it. It cannot catch up until the Stream delivers them again, and it is not compared until then.");
+    assert.equal(holed.second.line, "The keeper's ledger is 3 events behind the contract, and events 10 to 11 never reached it. It is not compared until the missing events reach it.");
     assert.match(page({ ledger: ledger({ lastSeq: 9n, missing: { from: 10n, to: 10n } }) }).second.line, /and event 10 never reached it/);
     // Behind because events were refused, not because they are late: the page does not call that "late, not wrong".
     const refused = page({ ledger: ledger({ lastSeq: 9n }), health: { ...health, rejected: 2 } });
@@ -622,7 +702,7 @@ describe("the Proof page", function () {
     assert.equal(capped.second.state, "agrees");
     assert.equal(
       capped.second.line,
-      "A second ledger, rebuilt only from the contract's 12 events as the Stream delivered them, agrees with the contract at block 400 on every figure of the newest 1 of 5 campaigns and on 0 backer records.",
+      "A second ledger, rebuilt only from the contract's 12 events as the keeper received them, agrees with the contract at block 400 on every figure of the newest 1 of 5 campaigns and on 0 backer records.",
     );
     // Campaign 2 is older than the window the page read, so it is never called "in the ledger but not in the contract".
     assert.ok(!capped.second.differences.some((d) => /campaign 2/.test(d)));
@@ -636,8 +716,8 @@ describe("the Proof page", function () {
     });
     const p = page({ health: troubled });
     const value = (label: string) => p.stream!.find((r) => r.label === label)!.value;
-    assert.equal(value("Last delivery"), "None yet");
-    assert.equal(value("Last heartbeat"), "None yet");
+    assert.equal(value("Last Stream delivery"), "None yet");
+    assert.equal(value("Last Stream heartbeat"), "None yet");
     assert.equal(value("Events missing"), "Numbers 4 to 6");
     assert.equal(value("Events set aside as not fitting"), "2");
     assert.equal(value("Campaigns in the events that the contract does not have (or not yet)"), "Numbers 9 and 11");

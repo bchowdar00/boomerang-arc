@@ -4,6 +4,7 @@
 import type { Address } from "../../../packages/kit/src/index.ts";
 import { Outcome } from "../../../packages/kit/src/index.ts";
 import { hrefFor } from "../app/route.ts";
+import type { PaceState } from "../data/pace.ts";
 import { clockLine, endsAs, phaseOf, progressOf, type Phase } from "../data/campaign.ts";
 import { short } from "../data/keeper.ts";
 import { nameOf, type Label, type Named } from "../data/labels.ts";
@@ -70,7 +71,21 @@ export function duesOf(c: CampaignView): Due[] {
   return dues;
 }
 
-const KEEPER_SOON = "The keeper usually does it within seconds.";
+const SETTLE_NOTE: Record<PaceState, string> = {
+  prompt: "The keeper usually does it within seconds.",
+  behind: "The keeper is behind the chain right now, so it waits for someone to press this.",
+  down: "The keeper is not answering right now, so it waits for someone to press this.",
+};
+const DUES_NOTE: Record<PaceState, string> = {
+  prompt: "The keeper usually does it within seconds.",
+  behind: "The keeper is behind the chain right now, so they wait for someone to press them.",
+  down: "The keeper is not answering right now, so they wait for someone to press them.",
+};
+const REFUNDS_NOTE: Record<PaceState, string> = {
+  prompt: "The keeper usually sends it first, within seconds.",
+  behind: "The keeper is behind the chain right now, so it may not send it first.",
+  down: "The keeper is not answering right now.",
+};
 
 export const CONTROL = "Nobody controls this contract. It has no owner, no upgrade and no pause; the rules on this page are all it can do.";
 
@@ -151,11 +166,11 @@ export function campaignPage(o: {
   desk: Address | null;
   now: bigint;
   block: bigint;
-  /** Whether the keeper answered at this read. When it did not, no sentence says it is about to act. */
-  keeperUp?: boolean;
+  /** How the keeper stands against the chain at this read. Only when it is prompt does a sentence say it is about to act. */
+  pace?: PaceState;
 }): CampaignPage {
   const c = o.campaign;
-  const keeperUp = o.keeperUp ?? true;
+  const pace = o.pace ?? "prompt";
   const dues = duesOf(c);
   const { terms: t, state: s } = c;
   const phase = phaseOf(t, s, o.now);
@@ -199,15 +214,12 @@ export function campaignPage(o: {
       phase === "ended"
         ? {
             button: "Settle this campaign",
-            note: `Anyone can do this, and it can only do what the rules say. ${keeperUp ? KEEPER_SOON : "The keeper is not answering right now, so it waits for someone to press this."}`,
+            note: `Anyone can do this, and it can only do what the rules say. ${SETTLE_NOTE[pace]}`,
           }
         : null,
     dues,
-    duesNote:
-      dues.length === 0
-        ? null
-        : `Anyone can send these, and each can only pay the address the contract names. ${keeperUp ? KEEPER_SOON : "The keeper is not answering right now, so they wait for someone to press them."}`,
-    refunds: phase === "missed" ? `A backer can send their own refund from this page with their wallet connected. ${keeperUp ? "The keeper usually sends it first, within seconds." : "The keeper is not answering right now."}` : null,
+    duesNote: dues.length === 0 ? null : `Anyone can send these, and each can only pay the address the contract names. ${DUES_NOTE[pace]}`,
+    refunds: phase === "missed" ? `A backer can send their own refund from this page with their wallet connected. ${REFUNDS_NOTE[pace]}` : null,
     control: CONTROL,
     asOf: `As of block ${o.block}`,
   };

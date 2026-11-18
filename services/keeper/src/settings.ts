@@ -27,6 +27,10 @@ export type Settings = {
   demoRecipient: Address | null;
   /** SignedPledge, the helper the relay submits one-signature pledges through; null turns the relay off. */
   signedPledge: Address | null;
+  /** Whether the keeper reads the node itself when the Stream is silent (follow.ts). On unless FOLLOW_NODE=off. */
+  followNode: boolean;
+  /** The block the contract was created in, where its events start: DEPLOY_BLOCK when given, else the kit's record on Arc and 0 on a local chain. */
+  deployBlock: bigint;
 };
 
 export class SettingsError extends Error {}
@@ -61,7 +65,10 @@ function rpcFrom(env: Env, o: { localOnly: boolean }): string | undefined {
   return value;
 }
 
-export function settingsFrom(env: Env, deployed: (chainId: number) => { boomerang: Address; usdc: Address; signedPledge?: Address | null } = addressesFor): Settings {
+export function settingsFrom(
+  env: Env,
+  deployed: (chainId: number) => { boomerang: Address; usdc: Address; signedPledge?: Address | null; deployBlock?: bigint | null } = addressesFor,
+): Settings {
   const secret = given(env, "STREAM_SECURITY_TOKEN");
   if (!secret) throw new SettingsError("STREAM_SECURITY_TOKEN is required");
 
@@ -75,15 +82,20 @@ export function settingsFrom(env: Env, deployed: (chainId: number) => { boomeran
   let signedPledge = addressFrom(env, "SIGNED_PLEDGE_ADDRESS");
   let chain: Chain;
   let rpcUrl: string;
+  const blockText = given(env, "DEPLOY_BLOCK");
+  if (blockText !== undefined && !/^[0-9]{1,15}$/.test(blockText)) throw new SettingsError("DEPLOY_BLOCK is not a block number");
+  // Unknown until one of: DEPLOY_BLOCK, the kit's record for the kit's own contract, or a local chain (0).
+  let deployBlock: bigint | undefined = blockText === undefined ? undefined : BigInt(blockText);
   if (local) {
     const rpc = rpcFrom(env, { localOnly: true });
     if (rpc === undefined) throw new SettingsError("RPC_URL is required when CHAIN_ID is not Arc Testnet's");
     if (!boomerang) throw new SettingsError("BOOMERANG_ADDRESS is required when CHAIN_ID is not Arc Testnet's");
     if (!usdc) throw new SettingsError("USDC_ADDRESS is required when CHAIN_ID is not Arc Testnet's");
     rpcUrl = rpc;
+    deployBlock = deployBlock ?? 0n;
     chain = defineChain({ id, name: `Local chain ${id}`, nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [rpc] } }, testnet: true });
   } else {
-    let fromKit: { boomerang: Address; usdc: Address; signedPledge?: Address | null } | undefined;
+    let fromKit: { boomerang: Address; usdc: Address; signedPledge?: Address | null; deployBlock?: bigint | null } | undefined;
     try {
       fromKit = deployed(arcTestnet.id);
     } catch {
@@ -96,6 +108,16 @@ export function settingsFrom(env: Env, deployed: (chainId: number) => { boomeran
     if (!usdc) throw new SettingsError("USDC_ADDRESS is not known; set it");
     rpcUrl = rpcFrom(env, { localOnly: false }) ?? arcTestnet.rpcUrls.default.http[0];
     chain = arcTestnet;
+    // A contract address given by hand may not be the kit's, so the kit's block is used only for the kit's contract.
+    if (deployBlock === undefined && fromKit?.deployBlock != null && boomerang.toLowerCase() === fromKit.boomerang.toLowerCase()) deployBlock = fromKit.deployBlock;
+  }
+
+  const follow = given(env, "FOLLOW_NODE") ?? "on";
+  if (follow !== "on" && follow !== "off") throw new SettingsError("FOLLOW_NODE must be on or off");
+  // Arc is tens of millions of blocks long: a read that starts from block 0 would never end.
+  if (deployBlock === undefined) {
+    if (follow === "on") throw new SettingsError("DEPLOY_BLOCK is required to read the node for this contract (or set FOLLOW_NODE=off)");
+    deployBlock = 0n;
   }
 
   const portText = given(env, "PORT") ?? "8787";
@@ -119,5 +141,7 @@ export function settingsFrom(env: Env, deployed: (chainId: number) => { boomeran
     dataDir: given(env, "KEEPER_DATA") ?? "./data",
     demoRecipient: addressFrom(env, "DEMO_RECIPIENT") ?? null,
     signedPledge: signedPledge ?? null,
+    followNode: follow === "on",
+    deployBlock,
   };
 }

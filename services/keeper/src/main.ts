@@ -9,6 +9,7 @@ import { privateKeyToAccount } from "viem/accounts";
 
 import { makeQueue, makeSender } from "./chain.ts";
 import { createDesk, type Desk } from "./demo.ts";
+import { createFollower, nodeFrom, type Follower } from "./follow.ts";
 import { createRelay, type Relay } from "./relay.ts";
 import { createKeeper, type Sender } from "./keeper.ts";
 import { createServer } from "./server.ts";
@@ -78,7 +79,29 @@ if (walletClient && settings.signedPledge) {
   relay = createRelay({ publicClient, walletClient, signedPledge: settings.signedPledge, usdc, queue, timer: () => BigInt(Math.floor(performance.now() / 1000)) });
 }
 
-const server = createServer({ keeper, secret, desk, relay, log: (line) => console.log(line) });
+// The keeper's own reading of the node, for when the Stream is silent: every five seconds it
+// looks whether the Stream has delivered lately and, if not, reads the newest block and the
+// contract's logs itself. A tick never throws and never overlaps the one before.
+const FOLLOW_EVERY_MS = 5_000;
+let follower: Follower | undefined;
+if (settings.followNode) {
+  // The follower asks through a client of its own that does not try a refused request again:
+  // its next tick is the retry, and a node saying "too many requests" is not asked four times over.
+  const followClient = createPublicClient({ chain, transport: http(rpcUrl, { retryCount: 0, timeout: 10_000 }) });
+  follower = createFollower({
+    keeper,
+    node: nodeFrom((args) => followClient.request(args as never) as Promise<unknown>, boomerang),
+    startBlock: settings.deployBlock,
+    log: (line) => console.log(line),
+  });
+  const running = follower;
+  void running.tick(); // at once: a keeper that has just started has heard nothing since its store was written
+  setInterval(() => void running.tick(), FOLLOW_EVERY_MS);
+}
+
+const server = createServer({ keeper, secret, desk, relay, follower, log: (line) => console.log(line) });
 server.listen(port, settings.host, () => {
-  console.log(`keeper on ${settings.host}:${port} chain ${chain.id}${settings.local ? " (local)" : ""} boomerang ${boomerang} signer ${signer} desk ${desk ? "on" : "off"} relay ${relay ? "on" : "off"}`);
+  console.log(
+    `keeper on ${settings.host}:${port} chain ${chain.id}${settings.local ? " (local)" : ""} boomerang ${boomerang} signer ${signer} desk ${desk ? "on" : "off"} relay ${relay ? "on" : "off"} node-follow ${follower ? "on" : "off"}`,
+  );
 });

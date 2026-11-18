@@ -25,6 +25,10 @@ export type HealthView = {
   relay: Address | null;
   /** Up to twenty campaign numbers the keeper's events name that the contract says it does not have; none when the keeper sends no list. */
   absent: bigint[];
+  /** The newest block a Stream delivery has covered since the keeper started; null when none has, or when the keeper does not say. */
+  streamBlock: number | null;
+  /** The keeper's own reading of the node, used when the Stream is silent; null when it is off or the keeper does not say. */
+  node: { following: boolean; reads: number; lastReadAt: number | null; readTo: number | null; faults: number } | null;
 };
 
 const fail = (path: string, want: string): never => {
@@ -38,6 +42,19 @@ const STRIP = /[\u{200e}\u{200f}\u{202a}-\u{202e}\u{2066}-\u{2069}\u{200b}-\u{20
 const CONTROL = /[\u{0}-\u{1f}\u{7f}-\u{9f}]/gu;
 const text = (v: unknown): string => String(v).replace(STRIP, "").replace(CONTROL, " ").slice(0, 200);
 const texts = (v: unknown, path: string): string[] => (Array.isArray(v) ? v.slice(-20).map(text) : fail(path, "list"));
+
+const readNode = (v: unknown): HealthView["node"] => {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "object" || Array.isArray(v)) return fail("node", "object or null");
+  const n = v as Record<string, unknown>;
+  return {
+    following: typeof n.following === "boolean" ? n.following : fail("node.following", "yes/no"),
+    reads: num(n.reads, "node.reads"),
+    lastReadAt: numOrNull(n.lastReadAt, "node.lastReadAt"),
+    readTo: numOrNull(n.readTo, "node.readTo"),
+    faults: num(n.faults, "node.faults"),
+  };
+};
 
 /** Read what GET /health returned. Throws if a field the page relies on is missing or of the wrong kind. */
 export function readHealth(json: unknown): HealthView {
@@ -65,5 +82,7 @@ export function readHealth(json: unknown): HealthView {
     absent: h.absent === undefined ? [] : Array.isArray(h.absent) ? h.absent.slice(0, 20).map((v, i) => big(v, `absent[${i}]`)) : fail("absent", "list"),
     desk: h.desk === null ? null : typeof h.desk === "string" && /^0x[0-9a-fA-F]{40}$/.test(h.desk) ? (h.desk as Address) : fail("desk", "address or null"),
     relay: h.relay === undefined || h.relay === null ? null : typeof h.relay === "string" && /^0x[0-9a-fA-F]{40}$/.test(h.relay) ? (h.relay as Address) : fail("relay", "address or null"),
+    streamBlock: h.streamBlock === undefined ? null : numOrNull(h.streamBlock, "streamBlock"),
+    node: readNode(h.node),
   };
 }

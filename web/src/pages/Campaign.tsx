@@ -1,6 +1,7 @@
 import type { Ctx } from "../app/context.ts";
 import { hrefFor } from "../app/route.ts";
 import { campaignIn, ownIn } from "../app/world.ts";
+import { paceOf } from "../data/pace.ts";
 import { finalizeCall, payCall, paySideCall } from "../flows/calls.ts";
 import { Band, OutcomeStamp } from "../ui/Board.tsx";
 import { Chart } from "../ui/Chart.tsx";
@@ -39,7 +40,8 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
   const { world, config } = ctx;
   const campaign = campaignIn(world, id);
   if (!campaign) return <Missing ctx={ctx} id={id} />;
-  const page = campaignPage({ campaign, labels: ctx.labels, desk: config.desk, now: world.now, block: world.block, keeperUp: world.keeper.up });
+  const pace = paceOf(world.keeper, world.block).state;
+  const page = campaignPage({ campaign, labels: ctx.labels, desk: config.desk, now: world.now, block: world.block, pace });
   // Without an account the buttons that send something become ways to get one: connect a wallet, or try a practice one.
   const connectButton =
     ctx.account === null ? (
@@ -55,7 +57,7 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
   // The connected account's own pledge to this campaign, in My money's own words; it offers the refund when one is owed.
   const own = ownIn(world, ctx.account);
   const myRow = own.known
-    ? (minePage({ account: ctx.account, mine: own.mine.filter((m) => m.campaign.id === id), labels: ctx.labels, desk: config.desk, block: world.block, keeperUp: world.keeper.up }).rows[0] ?? null)
+    ? (minePage({ account: ctx.account, mine: own.mine.filter((m) => m.campaign.id === id), labels: ctx.labels, desk: config.desk, block: world.block, pace }).rows[0] ?? null)
     : null;
   const payKey = `pay:${id}`;
   const board = boardView({ campaign, now: world.now });

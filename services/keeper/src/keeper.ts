@@ -1,5 +1,6 @@
-// The keeper itself: it takes Stream deliveries, keeps the event-sourced ledger in step, and
-// makes the settlement calls the ledger says are due. It holds no rights in the contract; every
+// The keeper itself: it takes deliveries (the Stream's, or its own reading of the node when the
+// Stream is silent: follow.ts), keeps the event-sourced ledger in step, and makes the settlement
+// calls the ledger says are due. It holds no rights in the contract; every
 // call it makes is open to anyone and harmless to repeat, so the whole thing is driven from the
 // ledger alone. A delivery seen before adds nothing to the ledger and sends nothing new.
 //
@@ -95,8 +96,11 @@ export type Health = {
   repeats: number;
   lastBlock: number;
   lastTime: string;
+  /** The Stream's own: this machine's wall time at its last delivery, its last heartbeat's block, and how many deliveries it has made since the keeper started. What the keeper read from the node itself (follow.ts) is not counted here. */
   lastDeliveryAt: number | null;
   lastBeatBlock: number | null;
+  /** The newest block a Stream delivery has covered since the keeper started. */
+  streamBlock: number | null;
   kvError: string | null;
   deliveries: number;
   sent: number;
@@ -110,7 +114,8 @@ export type Health = {
 
 export type Keeper = {
   readonly ledger: Ledger;
-  deliver(d: Delivery): { applied: number; repeats: number; done: Promise<{ action: Action; result: SendResult }[]> };
+  /** Take one delivery. `from` says who made it: the Stream (the default), or the keeper's own reading of the node. */
+  deliver(d: Delivery, from?: "stream" | "node"): { applied: number; repeats: number; done: Promise<{ action: Action; result: SendResult }[]> };
   health(): Health;
   feed(limit?: number): BoomerangEvent[]; // the most recent applied events, newest last
 };
@@ -209,6 +214,7 @@ export function createKeeper(o: {
   let lastBlock = 0;
   let lastBeatBlock: number | null = null;
   let lastDeliveryAt: number | null = null;
+  let streamBlock: number | null = null;
   let kvError: string | null = null;
   let deliveries = 0;
   let sent = 0;
@@ -462,7 +468,10 @@ export function createKeeper(o: {
     return done;
   }
 
-  function deliver(d: Delivery): {
+  function deliver(
+    d: Delivery,
+    from: "stream" | "node" = "stream",
+  ): {
     applied: number;
     repeats: number;
     done: Promise<{ action: Action; result: SendResult }[]>;
@@ -473,15 +482,23 @@ export function createKeeper(o: {
     // unanswered, so the Stream sends it again.
     const { applied, repeats } = take(decodeLogs(d.logs, boomerang), true, t);
 
-    lastDeliveryAt = clock();
-    deliveries += 1;
     if (t > lastTime) lastTime = t;
-    // What /health shows comes from the newest delivery by block, so an old delivery arriving
-    // late does not turn the display back.
-    if (d.toBlock >= lastBlock) {
-      lastBlock = d.toBlock;
-      kvError = d.kvError ?? null;
-      if (d.beat) lastBeatBlock = d.toBlock;
+    if (from === "node") {
+      // Read from the node by the keeper itself. The ledger, the clock and the newest block move
+      // as for any delivery; the Stream's own counters do not, so /health still says truly when
+      // the Stream last delivered.
+      if (d.toBlock >= lastBlock) lastBlock = d.toBlock;
+    } else {
+      lastDeliveryAt = clock();
+      deliveries += 1;
+      if (streamBlock === null || d.toBlock > streamBlock) streamBlock = d.toBlock;
+      // What /health shows comes from the newest delivery by block, so an old delivery arriving
+      // late does not turn the display back.
+      if (d.toBlock >= lastBlock) {
+        lastBlock = d.toBlock;
+        kvError = d.kvError ?? null;
+        if (d.beat) lastBeatBlock = d.toBlock;
+      }
     }
 
     return { applied, repeats, done: runActions() };
@@ -498,6 +515,7 @@ export function createKeeper(o: {
       lastTime: lastTime.toString(),
       lastDeliveryAt,
       lastBeatBlock,
+      streamBlock,
       kvError,
       deliveries,
       sent,

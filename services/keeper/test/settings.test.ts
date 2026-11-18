@@ -8,7 +8,7 @@ import type { Address } from "../../../packages/kit/src/index.ts";
 const B = "0x00000000000000000000000000000000000000b0" as Address;
 const U = "0x3600000000000000000000000000000000000000" as Address;
 const R = "0x00000000000000000000000000000000000000c0";
-const deployed = () => ({ boomerang: B, usdc: U });
+const deployed = () => ({ boomerang: B, usdc: U, deployBlock: 72n });
 const none = () => {
   throw new Error("not deployed");
 };
@@ -28,6 +28,31 @@ describe("the keeper's settings", function () {
     // Each can be set; an empty value is the same as none.
     const set = settingsFrom({ ...base, RPC_URL: "https://example.quiknode.pro/abc/", PORT: "9000", KEEPER_DATA: "/var/keeper", KEEPER_PRIVATE_KEY: "0xkey", DEMO_RECIPIENT: R, CHAIN_ID: "5042002", USDC_ADDRESS: "" }, deployed);
     assert.deepEqual([set.rpcUrl, set.port, set.dataDir, set.key, set.demoRecipient, set.local, set.usdc], ["https://example.quiknode.pro/abc/", 9000, "/var/keeper", "0xkey", R, false, U]);
+  });
+
+  it("settings.follow: the keeper reads the node itself when the Stream is silent unless told not to, from the block the kit's contract was created in", function () {
+    const withBlock = () => ({ boomerang: B, usdc: U, deployBlock: 72n });
+    const s = settingsFrom(base, withBlock);
+    assert.deepEqual([s.followNode, s.deployBlock], [true, 72n]);
+    assert.equal(settingsFrom({ ...base, FOLLOW_NODE: "on" }, withBlock).followNode, true);
+    assert.equal(settingsFrom({ ...base, FOLLOW_NODE: "off" }, withBlock).followNode, false);
+    assert.equal(settingsFrom({ ...base, FOLLOW_NODE: "" }, withBlock).followNode, true);
+    assert.throws(() => settingsFrom({ ...base, FOLLOW_NODE: "maybe" }, withBlock), (e) => e instanceof SettingsError && /^FOLLOW_NODE must be on or off$/.test(e.message));
+    // The kit's own address written another way is still the kit's contract.
+    assert.equal(settingsFrom({ ...base, BOOMERANG_ADDRESS: B.toUpperCase().replace("0X", "0x") }, withBlock).deployBlock, 72n);
+    // A block given by hand is used, on any chain.
+    assert.equal(settingsFrom({ ...base, DEPLOY_BLOCK: "500" }, withBlock).deployBlock, 500n);
+    assert.throws(() => settingsFrom({ ...base, DEPLOY_BLOCK: "0x1f4" }, withBlock), (e) => e instanceof SettingsError && /^DEPLOY_BLOCK is not a block number$/.test(e.message));
+    // On Arc a read from block 0 would never end. Another contract, or a kit with no block recorded,
+    // must say where its events start, or leave the node alone.
+    const noBlock = () => ({ boomerang: B, usdc: U });
+    const needs = (e: unknown) => e instanceof SettingsError && /^DEPLOY_BLOCK is required to read the node for this contract \(or set FOLLOW_NODE=off\)$/.test(e.message);
+    assert.throws(() => settingsFrom({ ...base, BOOMERANG_ADDRESS: R }, withBlock), needs);
+    assert.throws(() => settingsFrom(base, noBlock), needs);
+    assert.equal(settingsFrom({ ...base, BOOMERANG_ADDRESS: R, DEPLOY_BLOCK: "90" }, withBlock).deployBlock, 90n);
+    assert.deepEqual([settingsFrom({ ...base, FOLLOW_NODE: "off" }, noBlock).followNode, settingsFrom({ ...base, FOLLOW_NODE: "off" }, noBlock).deployBlock], [false, 0n]);
+    // A local chain is short: it starts from block 0.
+    assert.equal(settingsFrom({ ...base, CHAIN_ID: "31337", RPC_URL: "http://127.0.0.1:8545", BOOMERANG_ADDRESS: B, USDC_ADDRESS: U }, withBlock).deployBlock, 0n);
   });
 
   it("settings.refuses: each wrong value stops the keeper with that value's name, and no value's text", function () {
@@ -56,14 +81,14 @@ describe("the keeper's settings", function () {
     // Before a deployment there is no address to fall back on.
     assert.throws(() => settingsFrom(base, none), /Boomerang is not deployed yet/);
     assert.throws(() => settingsFrom({ ...base, BOOMERANG_ADDRESS: B }, none), /USDC_ADDRESS is not known/);
-    assert.equal(settingsFrom({ ...base, BOOMERANG_ADDRESS: B, USDC_ADDRESS: U }, none).boomerang, B);
+    assert.equal(settingsFrom({ ...base, BOOMERANG_ADDRESS: B, USDC_ADDRESS: U, DEPLOY_BLOCK: "5" }, none).boomerang, B);
   });
 
   it("settings.signedPledge: the relay's helper comes from SIGNED_PLEDGE_ADDRESS, else from the deployment on Arc, else none", function () {
     const H = "0x00000000000000000000000000000000000000d0";
     assert.equal(settingsFrom(base, deployed).signedPledge, null);
-    assert.equal(settingsFrom(base, () => ({ boomerang: B, usdc: U, signedPledge: H as Address })).signedPledge, H);
-    assert.equal(settingsFrom({ ...base, SIGNED_PLEDGE_ADDRESS: R }, () => ({ boomerang: B, usdc: U, signedPledge: H as Address })).signedPledge, R);
+    assert.equal(settingsFrom(base, () => ({ boomerang: B, usdc: U, signedPledge: H as Address, deployBlock: 72n })).signedPledge, H);
+    assert.equal(settingsFrom({ ...base, SIGNED_PLEDGE_ADDRESS: R }, () => ({ boomerang: B, usdc: U, signedPledge: H as Address, deployBlock: 72n })).signedPledge, R);
     const local = { ...base, CHAIN_ID: "31337", RPC_URL: "http://127.0.0.1:8545", BOOMERANG_ADDRESS: B, USDC_ADDRESS: U };
     assert.equal(settingsFrom(local, () => ({ boomerang: B, usdc: U, signedPledge: H as Address })).signedPledge, null);
     assert.equal(settingsFrom({ ...local, SIGNED_PLEDGE_ADDRESS: H }, deployed).signedPledge, H);

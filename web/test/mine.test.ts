@@ -125,7 +125,7 @@ describe("My money: another account", function () {
   });
 
   it("mine.other.keeperDown: the send note says the keeper is not answering", function () {
-    const down = minePage({ account: OTHER, mine, labels: [], desk: null, block: 9n, keeperUp: false, whose: "other" });
+    const down = minePage({ account: OTHER, mine, labels: [], desk: null, block: 9n, pace: "down", whose: "other" });
     assert.equal(
       down.rows[0].send?.note,
       "Anyone can send this, and it can only pay this backer's refund address. The keeper is not answering right now, so it waits for someone to press it.",

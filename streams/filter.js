@@ -10,9 +10,11 @@
 //      now and then even if the store lost track of a campaign.
 // A block with none of these is not delivered (the filter returns null).
 //
-// The filter is the only clock in the system. The keeper that receives these deliveries
-// has no timer and polls nothing; it calls `finalize` and the payout functions, which are
-// open to anyone, when a delivery says a campaign is due.
+// While the Stream delivers, the filter is the only clock in the system: the keeper that
+// receives these deliveries asks the chain nothing on its own, and calls `finalize` and the
+// payout functions, which are open to anyone, when a delivery says a campaign is due. Only
+// when the Stream has been silent for five minutes does the keeper read the node itself
+// (services/keeper/src/follow.ts), and it stops when the Stream delivers again.
 //
 // Rules of the sandbox: one function named `main`, no imports, no network, no eval.
 // `qnLib` is QuickNode's Key-Value Store library, provided by the sandbox.

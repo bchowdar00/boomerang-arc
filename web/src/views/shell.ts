@@ -161,7 +161,7 @@ export const WORDS = {
     title: "Proof",
     custody: "What the contract holds and owes",
     second: "A second ledger, built from the events alone",
-    stream: "The Stream and the keeper",
+    stream: "The keeper and what feeds it",
     errors: "What the keeper reported going wrong",
     facts: "The contracts",
     yourself: "Check it yourself",

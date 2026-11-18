@@ -5,6 +5,7 @@
 import { useEffect, useRef } from "react";
 
 import type { Ctx } from "../app/context.ts";
+import { paceOf } from "../data/pace.ts";
 import { useDesk } from "../ui/desk.ts";
 import { Flight } from "../ui/Flight.tsx";
 import { HeroCheque } from "../ui/Cheque.tsx";
@@ -14,6 +15,7 @@ import { mountLanding, scrollToSection } from "../ui/motion.ts";
 import { explorerLink } from "../views/links.ts";
 import { homePage } from "../views/home.ts";
 import { ledgerSub } from "../views/ledger.ts";
+import { settlementLine } from "../views/settlement.ts";
 import { pledgeRoute } from "../views/pledge.ts";
 
 export function Home({ ctx }: { ctx: Ctx }) {
@@ -102,10 +104,7 @@ export function Home({ ctx }: { ctx: Ctx }) {
             <h2 id="guarantee-h">
               The promise is in the code, <em>not the page.</em>
             </h2>
-            <p className="sub">
-              Boomerang is a non-custodial USDC contract. Its source is verified on Arc's explorer, and settlement runs on its own: a QuickNode Stream watches every block, and a keeper with no
-              special rights makes the calls anyone could make.
-            </p>
+            <p className="sub">{settlementLine(paceOf(world.keeper, world.block))}</p>
             <div className="contract">
               <span>Contract</span>
               <span className="mono">{config.boomerang}</span>

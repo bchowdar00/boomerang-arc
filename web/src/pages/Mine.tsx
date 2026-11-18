@@ -4,6 +4,7 @@ import type { Address } from "../../../packages/kit/src/index.ts";
 import type { Ctx } from "../app/context.ts";
 import { hrefFor } from "../app/route.ts";
 import { ownIn } from "../app/world.ts";
+import { paceOf } from "../data/pace.ts";
 import { payCall } from "../flows/calls.ts";
 import { Practice } from "../ui/Practice.tsx";
 import { Rows, Section, SendStatus } from "../ui/parts.tsx";
@@ -75,7 +76,7 @@ export function Mine({ ctx, who }: { ctx: Ctx; who: Address | null }) {
   else if (world.lookup?.example) mode = { k: "example" };
   else mode = { k: "empty" };
 
-  const base = { labels: ctx.labels, desk: config.desk, block: world.block, keeperUp: world.keeper.up, hasWallet: ctx.hasWallet, count: world.count, read: world.campaigns.length };
+  const base = { labels: ctx.labels, desk: config.desk, block: world.block, pace: paceOf(world.keeper, world.block).state, hasWallet: ctx.hasWallet, count: world.count, read: world.campaigns.length };
   const third = mode.k === "other" || mode.k === "example";
   // The address whose pledges are shown, and so the one any refund here would pay.
   const shown: Address | null = mode.k === "own" ? connected : third ? world.lookup!.address : null;

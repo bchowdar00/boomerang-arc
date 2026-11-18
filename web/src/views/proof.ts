@@ -1,7 +1,7 @@
 // The Proof page: what a stranger can check, and what this app does not claim.
 //
 // Three things are set side by side. The contract's own figures, read at one block. A second
-// ledger the keeper rebuilt from nothing but the contract's events as the Stream delivered them.
+// ledger the keeper rebuilt from nothing but the contract's events as the keeper received them.
 // And the Stream's own pulse. Only the first is the truth about the money; the other two are
 // there to be compared with it, and the page says plainly when they are late, absent or wrong.
 import type { Address } from "../../../packages/kit/src/index.ts";
@@ -10,6 +10,7 @@ import { hrefFor } from "../app/route.ts";
 import type { BackerCheck } from "../app/world.ts";
 import { phaseOf } from "../data/campaign.ts";
 import type { HealthView } from "../data/health.ts";
+import type { Pace } from "../data/pace.ts";
 import { backerDifferences, differences, short, standing, type LedgerView } from "../data/keeper.ts";
 import { nameOf, type Label } from "../data/labels.ts";
 import type { CampaignView, Custody } from "../data/load.ts";
@@ -70,7 +71,7 @@ function paidWord(c: CampaignView): string {
 export const LIMITS: readonly string[] = [
   "This runs on Arc Testnet with test USDC. No real money is involved and no real campaign has run on it.",
   "The names and descriptions of campaigns are this site's words. The contract holds only amounts, dates and addresses.",
-  "The keeper and the Stream make payouts prompt; they are not needed for them. With both off nothing is lost, only later: from this site anyone can settle a campaign, pay its recipient and return the pots that were not paid out, and a backer can send their own refund from the campaign's page or from My money. Anyone can send someone else's refund as well: look the backer's address up under My money.",
+  "The keeper makes payouts prompt; it is not needed for them. When it is off or behind the chain nothing is lost, only later: from this site anyone can settle a campaign, pay its recipient and return the pots that were not paid out, and a backer can send their own refund from the campaign's page or from My money. Anyone can send someone else's refund as well: look the backer's address up under My money.",
   "This site opens campaigns only through its desk, on fixed ten-minute terms. A sponsor with other terms calls the contract directly. The router for pledges from other chains is deployed, but this site has no form for such a pledge yet.",
   "A pledge from another chain is refunded on Arc, to the backer's address there, not back across the bridge.",
   "A one-signature pledge is sent by the keeper, which pays its gas. The signature can move the backer's USDC only into the campaign and amount it names, once, within three minutes. When the keeper is down or refuses, the page offers the two-step pledge, which needs no keeper.",
@@ -84,6 +85,21 @@ const numbers = (ids: readonly bigint[]): string =>
   ids.length === 0 ? "None" : ids.length === 1 ? `Number ${ids[0]}` : `Numbers ${ids.slice(0, -1).join(", ")} and ${ids[ids.length - 1]}`;
 
 const KEEPER_DOWN = "The keeper cannot be reached, so the second ledger is not shown. The contract's figures above do not depend on it.";
+
+// What the keeper's table says it is fed by, from the pace and, for the node case, the last Stream
+// delivery. "down" cannot happen with a health present; it is covered so the row is never empty.
+function fedBy(h: HealthView, pace: Pace): string {
+  if (pace.state === "down") return "The keeper did not answer at this read.";
+  if (pace.state === "behind") {
+    return pace.heard === 0
+      ? "Nothing yet. The keeper has heard no block since it started."
+      : `Nothing right now. The keeper last heard block ${pace.heard}, ${pace.blocks} blocks behind the chain.`;
+  }
+  if (pace.by === "stream") return "The QuickNode Stream";
+  return h.lastDeliveryAt === null
+    ? "Arc's node, read by the keeper itself. The Stream has delivered nothing since the keeper started."
+    : `Arc's node, read by the keeper itself. The Stream's last delivery was ${utcStamp(BigInt(Math.floor(h.lastDeliveryAt / 1000)))}.`;
+}
 
 export function proofPage(o: {
   /** Held, owed and the event count, read at one block; null if that read failed. */
@@ -103,6 +119,8 @@ export function proofPage(o: {
   labels?: readonly Label[];
   desk?: Address | null;
   now?: bigint;
+  /** How the keeper stands against the chain at this read; it decides how the keeper's table says it is fed. */
+  pace: Pace;
 }): ProofPage {
   const labels = o.labels ?? [];
   const desk = o.desk ?? null;
@@ -139,7 +157,7 @@ export function proofPage(o: {
             ? rejected > 0
               ? `The keeper's ledger is ${by} behind the contract, and the keeper has set ${rejected} ${rejected === 1 ? "event" : "events"} aside as not fitting. It is not compared until it has caught up.`
               : `The keeper's ledger is ${by} behind the contract. It is late, not wrong; the figures are compared once it catches up.`
-            : `The keeper's ledger is ${by} behind the contract, and ${hole.from === hole.to ? `event ${hole.from}` : `events ${hole.from} to ${hole.to}`} never reached it. It cannot catch up until the Stream delivers them again, and it is not compared until then.`,
+            : `The keeper's ledger is ${by} behind the contract, and ${hole.from === hole.to ? `event ${hole.from}` : `events ${hole.from} to ${hole.to}`} never reached it. It is not compared until the missing events reach it.`,
         differences: [],
       };
     } else if (s.kind === "ahead") {
@@ -177,7 +195,7 @@ export function proofPage(o: {
         found.length === 0
           ? {
               state: "agrees",
-              line: `A second ledger, rebuilt only from the contract's ${c.events} events as the Stream delivered them, agrees with the contract at block ${c.block} on every figure of ${campaignsPhrase} and on ${backerPhrase}.`,
+              line: `A second ledger, rebuilt only from the contract's ${c.events} events as the keeper received them, agrees with the contract at block ${c.block} on every figure of ${campaignsPhrase} and on ${backerPhrase}.`,
               differences: [],
             }
           : { state: "differs", line: "The second ledger does not agree with the contract. The contract is right; the ledger has been fed something wrong or missed something.", differences: found };
@@ -189,10 +207,14 @@ export function proofPage(o: {
     h === null
       ? null
       : [
-          { label: "Deliveries taken since the keeper started", value: String(h.deliveries) },
-          { label: "Last delivery", value: h.lastDeliveryAt === null ? "None yet" : utcStamp(BigInt(Math.floor(h.lastDeliveryAt / 1000))) },
-          { label: "Newest block delivered", value: String(h.lastBlock) },
-          { label: "Last heartbeat", value: h.lastBeatBlock === null ? "None yet" : `Block ${h.lastBeatBlock}` },
+          { label: "Fed by", value: fedBy(h, o.pace) },
+          { label: "Newest block heard", value: String(h.lastBlock) },
+          { label: "Stream deliveries taken since the keeper started", value: String(h.deliveries) },
+          { label: "Last Stream delivery", value: h.lastDeliveryAt === null ? "None yet" : utcStamp(BigInt(Math.floor(h.lastDeliveryAt / 1000))) },
+          { label: "Last Stream heartbeat", value: h.lastBeatBlock === null ? "None yet" : `Block ${h.lastBeatBlock}` },
+          ...(h.node !== null
+            ? [{ label: "Node reads since the keeper started", value: h.node.faults === 0 ? String(h.node.reads) : `${h.node.reads}, and ${h.node.faults} that failed` }]
+            : []),
           { label: "Events missing", value: h.missing === null ? "None" : `Numbers ${h.missing.from} to ${h.missing.to}` },
           { label: "Events set aside as not fitting", value: String(h.rejected) },
           { label: "Campaigns in the events that the contract does not have (or not yet)", value: numbers(h.absent) },

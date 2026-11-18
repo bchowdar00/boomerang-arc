@@ -324,6 +324,7 @@ describe("proof.campaigns", function () {
       labels: [],
       desk: null,
       now,
+      pace: { state: "down" },
     }).campaigns;
 
   it("the table heads, the ended word and the paid word for each kind of campaign", function () {

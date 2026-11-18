@@ -7,6 +7,7 @@ import { gzipSync } from "node:zlib";
 
 import { createServer } from "../src/server.ts";
 import type { Delivery, Health, Keeper } from "../src/keeper.ts";
+import type { FollowState } from "../src/follow.ts";
 import type { Desk, DeskResult } from "../src/demo.ts";
 import type { Relay, RelayResult } from "../src/relay.ts";
 import { applyEvents, emptyLedger, type Address, type BoomerangEvent, type Terms } from "../../../packages/kit/src/index.ts";
@@ -25,6 +26,7 @@ const health: Health = {
   lastTime: "0",
   lastDeliveryAt: null,
   lastBeatBlock: null,
+  streamBlock: null,
   kvError: null,
   deliveries: 0,
   sent: 0,
@@ -72,10 +74,10 @@ const fakeRelay: Relay = {
   },
 };
 
-type ServerOpts = { keeper: Keeper; secret?: string; desk?: Desk; relay?: Relay; maxBody?: number; maxHeld?: number; bodyDeadlineMs?: number };
+type ServerOpts = { keeper: Keeper; secret?: string; desk?: Desk; relay?: Relay; follower?: { state: () => FollowState }; maxBody?: number; maxHeld?: number; bodyDeadlineMs?: number };
 
 async function withServer<T>(opts: ServerOpts, fn: (url: string) => Promise<T>): Promise<T> {
-  const server = createServer({ keeper: opts.keeper, secret: opts.secret ?? secret, desk: opts.desk, relay: opts.relay, maxBody: opts.maxBody, maxHeld: opts.maxHeld, bodyDeadlineMs: opts.bodyDeadlineMs });
+  const server = createServer({ keeper: opts.keeper, secret: opts.secret ?? secret, desk: opts.desk, relay: opts.relay, follower: opts.follower, maxBody: opts.maxBody, maxHeld: opts.maxHeld, bodyDeadlineMs: opts.bodyDeadlineMs });
   await new Promise<void>((r) => server.listen(0, r));
   const { port } = server.address() as AddressInfo;
   try {
@@ -301,6 +303,19 @@ describe("keeper server", function () {
       const camp = await fetch(url + "/demo/campaign", { method: "POST" });
       assert.equal(camp.status, 200);
       assert.deepEqual(await camp.json(), { ok: true, id: "7" });
+    });
+  });
+
+  it("server.health.node: /health carries the follower's state, or null when the keeper does not read the node", async function () {
+    const { keeper } = fakeKeeper();
+    await withServer({ keeper }, async (url) => {
+      const h = (await (await fetch(url + "/health")).json()) as { node: unknown; streamBlock: unknown };
+      assert.equal(h.node, null);
+      assert.equal(h.streamBlock, null);
+    });
+    const state = { following: true, reads: 4, lastReadAt: 1_700_000_000_000, readTo: 812, faults: 1 };
+    await withServer({ keeper, follower: { state: () => state } }, async (url) => {
+      assert.deepEqual(((await (await fetch(url + "/health")).json()) as { node: unknown }).node, state);
     });
   });
 

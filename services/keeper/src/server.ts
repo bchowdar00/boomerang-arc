@@ -7,6 +7,7 @@ import http from "node:http";
 
 import { missing } from "../../../packages/kit/src/index.ts";
 import type { Desk } from "./demo.ts";
+import type { Follower } from "./follow.ts";
 import { parseDelivery, type Keeper } from "./keeper.ts";
 import { RELAY, type Relay } from "./relay.ts";
 import { bodyText, verifySignature } from "./verify.ts";
@@ -126,6 +127,8 @@ export function createServer(o: {
   desk?: Desk;
   /** Submits one-signature pledges (POST /relay); absent when the keeper has no key or no helper. */
   relay?: Relay;
+  /** The keeper's own reading of the node (follow.ts), shown in /health; absent when it is off. */
+  follower?: Pick<Follower, "state">;
   /** The largest body /stream takes, packed or unpacked. Default 1 MiB. */
   maxBody?: number;
   /** What all bodies being read at one moment may hold together. Default eight times maxBody. */
@@ -134,7 +137,7 @@ export function createServer(o: {
   bodyDeadlineMs?: number;
   log?: (line: string) => void;
 }): http.Server {
-  const { keeper, secret, desk, relay, log } = o;
+  const { keeper, secret, desk, relay, follower, log } = o;
   // A delivery carries only Boomerang's own logs for a block or a few: a megabyte is far more
   // than that needs. The same limit holds for a compressed body once unpacked.
   const maxBody = o.maxBody ?? 1024 * 1024;
@@ -275,7 +278,7 @@ export function createServer(o: {
     }
 
     if (method === "GET" && path === "/ledger") return reply(200, ledgerJson(keeper), true);
-    if (method === "GET" && path === "/health") return reply(200, { ...keeper.health(), desk: desk ? desk.address : null, relay: relay ? relay.address : null }, true);
+    if (method === "GET" && path === "/health") return reply(200, { ...keeper.health(), node: follower ? follower.state() : null, desk: desk ? desk.address : null, relay: relay ? relay.address : null }, true);
 
     if (method === "POST" && path === "/demo/usdc") {
       if (!desk) return reply(503, { ok: false, reason: "no-desk" }, true);

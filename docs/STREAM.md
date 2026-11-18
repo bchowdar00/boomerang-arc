@@ -1,15 +1,16 @@
 # The QuickNode Stream
 
-**Status:** created at QuickNode and delivering on Arc Testnet since 2026-11-17 (Stream `boomerang-arc-testnet`, from block 72640266, webhook to the keeper on Azure); the keeper accepts every delivery. The filter was also tested locally against QuickNode's documented payload shape.
+**Status:** created at QuickNode and delivered on Arc Testnet from 2026-11-17 to 2026-11-18 19:18 UTC (Stream `boomerang-arc-testnet`, blocks 72640266 to 72897900, webhook to the keeper on Azure); the keeper took 935 deliveries. It has been silent since, by QuickNode's own figures because the free trial's credits were used up ("Cost and running hours" below), and is left paused; the keeper reads Arc's node itself while it is. The filter was also tested locally against QuickNode's documented payload shape. The filter given to QuickNode when the Stream was made is `streams/filter.js` as first committed here; since then only the comment at its head has changed. What QuickNode holds was not read again.
 **Last reconciled:** 2026-11-18 (status and gaps; QuickNode's docs were read at quicknode.com/docs/streams on 2026-11-15).
-**Known gaps:** how QuickNode's store reports a failed write (by throwing, or in its return value) is not documented, and the filter only catches a throw; what a read of a list that does not exist returns is not documented either, so the filter treats only an error that names a missing list or key as empty and reports every other error; credits per block on Arc Testnet are not published and are not yet measured; Arc's docs say blocks arrive faster than once a second and that several may share one timestamp (docs.arc.io/integrate/infrastructure, read 2026-11-15), but the actual rate is not yet measured, so the filter's three timing constants are first guesses: at two blocks a second, "every 25th block" is about 12 seconds and the heartbeat about 2.5 minutes.
+**Known gaps:** how QuickNode's store reports a failed write (by throwing, or in its return value) is not documented, and the filter only catches a throw; what a read of a list that does not exist returns is not documented either, so the filter treats only an error that names a missing list or key as empty and reports every other error; the account's own usage page was not read, so that the trial's credits ran out is worked out from QuickNode's published figures, not seen; Arc's docs say blocks arrive faster than once a second and that several may share one timestamp (docs.arc.io/integrate/infrastructure, read 2026-11-15), but the actual rate is not yet measured, so the filter's three timing constants are first guesses: at two blocks a second, "every 25th block" is about 12 seconds and the heartbeat about 2.5 minutes.
 
 ## What it is for
 
-Boomerang's contract settles itself only when someone calls it: `finalize` at the deadline, then the payouts. Those calls are open to anyone. The Stream is what makes them happen on time without anyone watching: it is the system's only clock.
+Boomerang's contract settles itself only when someone calls it: `finalize` at the deadline, then the payouts. Those calls are open to anyone. The Stream is what makes them happen on time without anyone watching: while it delivers, it is the system's only clock.
 
-- No server here polls the chain, and none runs a timer.
-- If the Stream is off, nothing breaks: any person can still call `finalize`, `pay`, `payMany` and `paySide` from the app or a block explorer. Payouts are only later.
+- While the Stream delivers, no server here polls the chain, and none runs a timer of its own.
+- If the Stream is off, nothing breaks. After five minutes of silence the keeper reads Arc's node itself (the newest block and the contract's logs, every five seconds; `services/keeper/src/follow.ts`, described in [ARCHITECTURE.md](ARCHITECTURE.md)) and settles as before, a few seconds behind the chain. It goes back to the Stream when the Stream delivers again.
+- If the keeper is off too, any person can still call `finalize`, `pay`, `payMany` and `paySide` from the app or a block explorer. Payouts are only later.
 
 ## Configuration
 
@@ -63,4 +64,6 @@ A delivery looks like this:
 
 ## Cost and running hours
 
-QuickNode charges Streams by blocks processed. The rate for Arc Testnet is not published; it will be measured on the first day the Stream runs and written here with the date. Arc produces more than 86,400 blocks a day (its blocks are sub-second), so a Stream left running all week processes at least 600,000 blocks. If the free plan cannot carry the Stream all week, it runs in stated windows (the video recording, judging, the finals) and the app says when it is off.
+QuickNode charges Streams by blocks processed. Its calculator charges 40 API credits a block for the Block with Receipts dataset on Arc Testnet and counts 5,184,000 Arc Testnet blocks in 30 days (about 172,800 a day, two a second), so this Stream costs about 6.9 million credits a day; its pricing page lists 10 million credits for the free trial and 80 million a month on the 49-dollar plan (all read at quicknode.com on 2026-11-18).
+
+What happened: the Stream processed 257,634 blocks (72640266 to 72897900), which at 40 credits is 10.3 million, and stopped delivering at 19:18 UTC on 2026-11-18, about a day and a half after it started. It is left paused. The keeper's own reading of the node carries settlement meanwhile, and the app's Proof page says which of the two is feeding the keeper. On the 49-dollar plan the same Stream would run for about eleven and a half days a month.

@@ -1,7 +1,8 @@
 // A stand-in for the QuickNode Stream on a developer's machine. It follows a LOCAL node, runs
 // streams/filter.js over each new block and posts what the filter returns to a local keeper,
 // signed the way QuickNode signs. It refuses any node or keeper that is not on this machine:
-// on Arc the Stream is QuickNode's, and nothing in production polls a chain.
+// on Arc the Stream is QuickNode's, and this stand-in never runs there. (What the keeper does
+// on Arc when the Stream is silent is a different, much smaller thing: services/keeper/src/follow.ts.)
 //
 //   BOOMERANG_ADDRESS=0x... STREAM_SECURITY_TOKEN=... node scripts/local-stream.mjs
 //

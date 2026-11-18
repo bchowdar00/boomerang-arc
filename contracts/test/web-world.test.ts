@@ -139,6 +139,7 @@ describe("the app's one-block read", function () {
       custody: world.custody, campaigns: world.campaigns, count: world.count,
       ledger, health, backerChecks: world.backerChecks, backerTotal: world.backerTotal,
       where: { ...where, router: w.boomerang.address },
+      pace: { state: "prompt", by: "stream" },
     });
     assert.equal(page.second.state, "differs");
     assert.ok(
