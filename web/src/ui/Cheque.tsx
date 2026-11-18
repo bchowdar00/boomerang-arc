@@ -23,7 +23,7 @@ import { boardTime } from "../views/board.ts";
 import { pledgeForm, pledgeRoute, requote, stillValidLine, type Answer } from "../views/pledge.ts";
 import { receiptView } from "../views/receipt.ts";
 import { PRACTICE } from "../views/practice.ts";
-import { deskOffer, signedButton, WORDS } from "../views/shell.ts";
+import { deskOffer, pledgeSentLine, signedButton, WORDS } from "../views/shell.ts";
 import { useDesk } from "./desk.ts";
 import { Waves } from "./Guilloche.tsx";
 import { SendStatus } from "./parts.tsx";
@@ -325,11 +325,11 @@ export function Cheque({
             {fellBack}
           </p>
         ) : null}
-        {/* Once a new amount is typed, the last pledge's finished steps give way to it; a send in progress or its error stays. */}
-        <SendStatus state={sending && (sending.busy || sending.error !== null || text === "") ? sending : null} />
+        {/* A send's steps show while it runs and when it fails; once it is in, one line says so. */}
+        <SendStatus state={sending && (sending.busy || sending.error !== null) ? sending : null} />
         {showSent ? (
-          <p role="status">
-            {WORDS.pledge.sent} {choices ? <a href={hrefFor({ page: "campaign", id })}>{WORDS.cheque.seeIt}</a> : null}
+          <p role="status" className="cq-sent">
+            {pledgeSentLine(!choices)} {choices ? <a href={hrefFor({ page: "campaign", id })}>{WORDS.cheque.seeIt}</a> : null}
           </p>
         ) : null}
         {offer ? (

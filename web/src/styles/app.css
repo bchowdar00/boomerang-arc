@@ -76,6 +76,11 @@
   font-family: var(--code);
   font-size: 0.92em;
 }
+.row-long dd {
+  flex-basis: 100%;
+  text-align: left;
+  max-width: 62ch;
+}
 
 /* ── The feed: ruled rows, the time and explorer link kept quiet. ── */
 
@@ -124,6 +129,13 @@
   gap: 4px;
   font-size: 0.92rem;
   color: var(--ink-2);
+}
+/* The step being taken reads in ink; the ones behind it step back. */
+.send-status p {
+  animation: cq-rise 160ms var(--ease) both;
+}
+.send-status p:not(:last-child):not(.problem) {
+  color: var(--ink-soft);
 }
 
 /* ══ Campaign page ══ */
@@ -226,6 +238,7 @@
   font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.3rem);
   line-height: 1.05;
   display: inline-flex;
+  flex-direction: row;
   white-space: nowrap;
 }
 .campaign .plate-togo .figure {
@@ -306,6 +319,45 @@
   align-items: flex-start;
   padding-top: 14px;
   border-top: 1px solid var(--rule);
+}
+
+/* The backer's own ending, at the head of the voucher: My money's sentence, set as a figure.
+   Vermilion only when the money came back. It rises once the stamp is down. */
+.campaign .voucher-mine {
+  display: grid;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 1.3rem;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  text-wrap: balance;
+  animation: voucher-rise 420ms var(--ease) 260ms both;
+}
+.campaign .voucher-mine.came-back {
+  color: var(--verm);
+}
+.campaign .voucher-mine .caption {
+  letter-spacing: 0;
+}
+/* The stamp comes down on the sheet once, when the outcome is first shown. */
+.campaign .voucher .stamp {
+  transform-origin: 30% 60%;
+  animation: stamp-land 360ms var(--ease) both;
+}
+@keyframes stamp-land {
+  from {
+    opacity: 0;
+    scale: 1.45;
+    rotate: -11deg;
+    filter: blur(3px);
+  }
+}
+@keyframes voucher-rise {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
 }
 
 /* The outcome stamp: cleared in ink, returned in vermilion, never opened in ink-soft. */

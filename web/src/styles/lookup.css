@@ -79,17 +79,17 @@
   border-top: 1.5px solid var(--ink);
   padding-top: 14px;
 }
-.figure {
+.figures .figure {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
-.figure dt {
+.figures .figure dt {
   color: var(--ink-soft);
   font-size: 0.88rem;
 }
-.figure dd {
+.figures .figure dd {
   margin: 0;
   font-weight: 600;
   font-variant-numeric: tabular-nums;

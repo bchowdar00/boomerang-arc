@@ -11,6 +11,7 @@ import { nameOf, type Label, type Named } from "../data/labels.ts";
 import type { CampaignView } from "../data/load.ts";
 import { formatUsd } from "../data/money.ts";
 import { utcStamp } from "../data/time.ts";
+import type { MineRow } from "./mine.ts";
 
 /** One line of the terms. `address` is set when the value is an account the page can link to the explorer. */
 export type Row = { label: string; value: string; address?: Address };
@@ -223,6 +224,18 @@ export function campaignPage(o: {
     control: CONTROL,
     asOf: `As of block ${o.block}`,
   };
+}
+
+/**
+ * The voucher's lines for the backer looking at it, once their pledge has ended and nothing is
+ * left for them to send: the sentence is My money's own. A pledge that came back is marked, so the
+ * page can set it in the one colour that means that. A refund still owed has its own line and
+ * button, and a pledge still counted has the cheque, so both say nothing here.
+ */
+export function voucherMine(row: MineRow | null): { label: string; line: string; cameBack: boolean } | null {
+  if (row === null || row.send !== null) return null;
+  if (row.kind !== "returned" && row.kind !== "given") return null;
+  return { label: "Your pledge", line: row.line, cameBack: row.kind === "returned" };
 }
 
 /** A campaign number the contract does not have. */

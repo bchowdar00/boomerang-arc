@@ -32,7 +32,7 @@ describe("checks.view", function () {
     assert.equal(v.title, "Check it here");
     assert.equal(
       v.intro,
-      "These checks run in this browser when you press the button. They ask the chain directly, which can take up to a minute; nothing is sent and no wallet is needed.",
+      "These checks run in this browser when you press the button. They ask the chain directly, which takes a few seconds, or longer if every block has to be read; nothing is sent and no wallet is needed.",
     );
     assert.equal(v.button, "Run the checks");
     assert.equal(v.running, null);
@@ -367,3 +367,76 @@ describe("proof.campaigns", function () {
     assert.equal(t.note, "The newest 1 of 12 campaigns.");
   });
 });
+
+// A contract with no campaign and no event yet, at block 1000, whose node writes down each log
+// request. The explorer's two answers (the list of logs, the verified source) are stand-ins.
+describe("checks.hints", function () {
+  const quiet = () => {
+    const asked: { from: bigint; to: bigint }[] = [];
+    const client = {
+      getCode: async () => liveCode(USDC),
+      getBlockNumber: async () => 1000n,
+      getLogs: async (a: { fromBlock: bigint; toBlock: bigint }) => {
+        asked.push({ from: a.fromBlock, to: a.toBlock });
+        return [];
+      },
+      readContract: async ({ functionName }: { functionName: string }) => (functionName === "balanceOf" ? 100n : functionName === "totalOwed" ? 0n : 0n),
+    } as unknown as PublicClient;
+    return { client, asked };
+  };
+  const verified = { status: 200, json: async () => ({ is_verified: true, is_fully_verified: true }) };
+
+  it("with an explorer, the ledger row asks it where the logs are and reads only there, at the pace it is given", async function () {
+    const { client, asked } = quiet();
+    const urls: string[] = [];
+    const waits: number[] = [];
+    const results = await runChecks({
+      client, boomerang: BOOMERANG, usdc: USDC, fromBlock: 0n, explorer: EXPLORER, chunk: 100n, gapMs: 350,
+      wait: async (ms) => void waits.push(ms),
+      fetch: async (url) => {
+        urls.push(url);
+        return url.endsWith("/logs") ? { status: 200, json: async () => ({ items: [{ block_number: "10" }, { block_number: "420" }], next_page_params: null }) } : verified;
+      },
+    });
+    assert.deepEqual(urls, [`${EXPLORER}/api/v2/addresses/${BOOMERANG}/logs`, `${EXPLORER}/api/v2/smart-contracts/${BOOMERANG}`]);
+    assert.deepEqual(asked, [{ from: 10n, to: 10n }, { from: 420n, to: 420n }]);
+    assert.deepEqual(waits, [350]);
+    const ledger = results.find((r) => r.id === "ledger")!;
+    assert.ok(ledger.ok, ledger.detail);
+    assert.equal(
+      ledger.detail,
+      "0 campaign(s), 0 backer(s), seq 1..0 match the contract at block 1000; the logs were read from the node at 2 range(s) of blocks named by Arc's explorer, and the contract's own count of 0 event(s) shows none is missing",
+    );
+    assert.deepEqual(results.map((r) => [r.id, r.ok]), [["code", true], ["no-owner", true], ["custody", true], ["ledger", true], ["explorer", true]]);
+  });
+
+  it("an explorer that cannot list the logs, or never answers, leaves the row reading every block; its own row is judged apart", async function () {
+    const fetches: ((url: string) => Promise<{ status: number; json(): Promise<unknown> }>)[] = [
+      async (url) => (url.endsWith("/logs") ? { status: 500, json: async () => ({}) } : verified),
+      async (url) => (url.endsWith("/logs") ? { status: 200, json: async () => ({ items: [{ block_number: "<b>" }] }) } : verified),
+      (url) => (url.endsWith("/logs") ? new Promise(() => {}) : Promise.resolve(verified)),
+    ];
+    for (const fetch of fetches) {
+      const { client, asked } = quiet();
+      const results = await runChecks({ client, boomerang: BOOMERANG, usdc: USDC, fromBlock: 0n, explorer: EXPLORER, chunk: 100n, explorerWaitMs: 30, fetch });
+      assert.equal(asked.length, 11);
+      assert.deepEqual(asked[0], { from: 0n, to: 99n });
+      assert.deepEqual(asked[10], { from: 1000n, to: 1000n });
+      const ledger = results.find((r) => r.id === "ledger")!;
+      assert.ok(ledger.ok, ledger.detail);
+      assert.match(ledger.detail, /; every block from 0 was read$/);
+      assert.doesNotMatch(ledger.detail, /<b>/);
+      assert.ok(results.find((r) => r.id === "explorer")!.ok);
+    }
+  });
+
+  it("with no explorer nobody is asked and every block is read", async function () {
+    const { client, asked } = quiet();
+    let fetched = 0;
+    const results = await runChecks({ client, boomerang: BOOMERANG, usdc: USDC, fromBlock: 0n, explorer: null, chunk: 100n, fetch: async () => (fetched++, verified) });
+    assert.equal(fetched, 0);
+    assert.equal(asked.length, 11);
+    assert.ok(results.find((r) => r.id === "ledger")!.ok);
+  });
+});
+

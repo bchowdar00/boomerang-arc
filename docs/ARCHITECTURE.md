@@ -2,7 +2,7 @@
 
 **Status:** describes the code in this repository. It has been deployed on Arc Testnet since 2026-11-17; the addresses are in `packages/kit/addresses.json` and the README, and no live measurement appears here.
 **Last reconciled:** 2026-11-18.
-**Known gaps:** the keeper's follower (its own reading of the node when the Stream is silent) has run against a local node only, not yet on Arc; the router has only run against a stand-in for Circle's contracts, written from Circle's published source; the one-signature pledges on Arc were signed by scripts, so how common wallets show its typed data is not checked; no pledge from another chain has run on Arc.
+**Known gaps:** the keeper's follower (its own reading of the node when the Stream is silent) has read Arc's node on Azure since 2026-11-18 20:53 UTC, but no campaign has come due on Arc since, so a settlement driven by it has been seen on a local chain only; the router has only run against a stand-in for Circle's contracts, written from Circle's published source; the one-signature pledges on Arc were signed by scripts, so how common wallets show its typed data is not checked; no pledge from another chain has run on Arc.
 
 ## The parts
 

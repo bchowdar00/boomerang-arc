@@ -1,8 +1,13 @@
 // A keyless check anyone can run against the live Boomerang:
 //
-//   node scripts/check-live.mjs [--rpc <url>]
+//   node scripts/check-live.mjs [--rpc <url>] [--full]
 //
-// It reads the chain and prints one PASS/FAIL line per check. It holds no key and sends no
+// It reads the chain and prints one PASS/FAIL line per check. For the ledger row it asks Arc's
+// explorer which blocks hold the contract's logs, reads those logs from the node itself, and
+// counts the read whole only when the contract's own count of its events says none is missing;
+// the explorer is not trusted with anything else. `--full` asks no one and reads every block
+// since the contract's first, at the pace Arc's public node accepts (a few log requests a second,
+// about sixty a minute), which takes longer as the chain grows. It holds no key and sends no
 // transaction. Exit 0: every check passed. Exit 1: a check ran and failed. Exit 2: it could not
 // check (nothing deployed yet, or the deployment record is incomplete), said why, and did not
 // touch the network.
@@ -13,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { createPublicClient, http } from "viem";
 
 import { arcTestnet } from "../packages/kit/src/index.ts";
-import { checkLive } from "./lib/check.ts";
+import { checkLive, explorerBlocks } from "./lib/check.ts";
 
 const ARC_CHAIN_ID = 5042002;
 // Circle's USDC on Arc Testnet, written here and not taken from addresses.json: the file this
@@ -28,8 +33,10 @@ const helperArtifactPath = new URL("../contracts/artifacts/contracts/SignedPledg
 
 function parseRpc(argv) {
   const i = argv.indexOf("--rpc");
-  if (i >= 0 && i + 1 < argv.length) return argv[i + 1];
-  return arcTestnet.rpcUrls.default.http[0];
+  if (i < 0) return arcTestnet.rpcUrls.default.http[0];
+  const url = argv[i + 1];
+  if (url === undefined || url.startsWith("--")) return null;
+  return url;
 }
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -71,6 +78,7 @@ async function main() {
   }
 
   const rpc = parseRpc(process.argv.slice(2));
+  if (rpc === null) stop("--rpc needs the address of a node after it, for example --rpc https://rpc.testnet.arc.io");
   const client = createPublicClient({ chain: arcTestnet, transport: http(rpc) });
 
   // The one-signature pledge helper, when the deployment recorded one: a sixth row.
@@ -86,7 +94,25 @@ async function main() {
     helper = { address: raw.signedPledge, artifact: helperArtifact };
   }
 
-  const rows = await checkLive({ client, boomerang: raw.boomerang, usdc: ARC_USDC, fromBlock, artifact, deployTx: raw.boomerangTx, helper });
+  // Where the ledger row looks for the logs. Another addresses file is for this script's own
+  // tests; the explorer knows nothing of what it names, so it is not asked then.
+  const explorer = process.argv.includes("--full") || addressesFile ? null : arcTestnet.blockExplorers.default.url;
+  const askExplorer = async (url) => {
+    const res = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(10_000) });
+    return { status: res.status, json: () => res.json() };
+  };
+  // The explorer gets fifteen seconds in all to say where; past that every block is read.
+  const inTime = (work) => {
+    let timer;
+    const late = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("the explorer did not answer in time")), 15_000);
+    });
+    return Promise.race([work, late]).finally(() => clearTimeout(timer));
+  };
+  const hints = explorer === null ? undefined : { from: "Arc's explorer", blocks: () => inTime(explorerBlocks(explorer, raw.boomerang, askExplorer)) };
+  const read = { gapMs: 350, hints };
+
+  const rows = await checkLive({ client, boomerang: raw.boomerang, usdc: ARC_USDC, fromBlock, artifact, deployTx: raw.boomerangTx, helper, read });
   let allOk = true;
   for (const r of rows) {
     if (!r.ok) allOk = false;

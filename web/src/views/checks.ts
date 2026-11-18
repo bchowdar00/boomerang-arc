@@ -22,7 +22,7 @@ export type ChecksView = {
 
 const TITLE = "Check it here";
 const INTRO =
-  "These checks run in this browser when you press the button. They ask the chain directly, which can take up to a minute; nothing is sent and no wallet is needed.";
+  "These checks run in this browser when you press the button. They ask the chain directly, which takes a few seconds, or longer if every block has to be read; nothing is sent and no wallet is needed.";
 const OUTSIDE =
   "One check cannot run in a browser: that the contract was created by exactly this repository's code and nothing else. The commands below run it, with the other checks, from your own copy of the code.";
 

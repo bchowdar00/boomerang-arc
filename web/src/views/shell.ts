@@ -121,7 +121,6 @@ export const WORDS = {
     siteWords: "The name and description above are this site's words. Every amount, date and address on this page is read from the contract.",
     chainWords: "This campaign has no name on this site. Everything shown is read from the contract.",
     example: "An example campaign: the people named are invented.",
-    demo: "A ten-minute campaign, opened by this site's desk.",
     deskWords: "This site's desk opened this campaign, and the name above is this site's. Every amount, date and address on this page is read from the contract.",
     pledge: "Pledge to this campaign",
   },
@@ -132,6 +131,7 @@ export const WORDS = {
     fromContract: "This is the contract's own answer for this amount, read just now.",
     estimate: "This is worked out by this page from the contract's rules. The contract is being asked.",
     sent: "Your pledge is in. It shows on the campaign page and under My money.",
+    sentHere: "Your pledge is in. It shows on this page and under My money.",
     oneSignature: "One signature in your wallet, no gas: the keeper sends it for you.",
     signing: "Sign the pledge in your wallet. It is a signature, not a transaction, and costs no gas.",
     relaying: "Signed. The keeper is sending your pledge.",
@@ -170,3 +170,8 @@ export const WORDS = {
   wallets: { choose: "Choose a wallet", cancel: "Cancel" },
   explorer: "View on the explorer",
 } as const;
+
+/** The line under the cheque once a pledge is in. On the campaign's own page it says "this page". */
+export function pledgeSentLine(onCampaignPage: boolean): string {
+  return onCampaignPage ? WORDS.pledge.sentHere : WORDS.pledge.sent;
+}

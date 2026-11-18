@@ -10,7 +10,7 @@ import { Feed, Rows, Section, SendStatus } from "../ui/parts.tsx";
 import { Practice } from "../ui/Practice.tsx";
 import { backersTable } from "../views/backers.ts";
 import { agoOf, boardView, settledLine } from "../views/board.ts";
-import { campaignPage, missingPage } from "../views/campaign.ts";
+import { campaignPage, missingPage, voucherMine } from "../views/campaign.ts";
 import { feedView } from "../views/feed.ts";
 import { minePage } from "../views/mine.ts";
 import { WORDS } from "../views/shell.ts";
@@ -59,6 +59,7 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
   const myRow = own.known
     ? (minePage({ account: ctx.account, mine: own.mine.filter((m) => m.campaign.id === id), labels: ctx.labels, desk: config.desk, block: world.block, pace }).rows[0] ?? null)
     : null;
+  const mine = voucherMine(myRow);
   const payKey = `pay:${id}`;
   const board = boardView({ campaign, now: world.now });
   const ledger = world.keeper.up ? world.keeper.ledger : null;
@@ -83,7 +84,8 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
         <h1>{page.name.title}</h1>
         <p className="by">{page.name.by}</p>
         {page.name.about ? <p className="about">{page.name.about}</p> : null}
-        {page.name.example ? <p className="tag">{page.name.labelled ? WORDS.campaign.example : WORDS.campaign.demo}</p> : null}
+        {/* A desk campaign already says whose it is, in the two lines above; the tag is for an example with a name and a story of the site's. */}
+        {page.name.example && page.name.labelled ? <p className="tag">{WORDS.campaign.example}</p> : null}
       </header>
 
       <div className="camp-body">
@@ -99,6 +101,12 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
           ) : (
             <section className="voucher">
               {showStamp && board.result ? <OutcomeStamp result={board.result} /> : null}
+              {mine ? (
+                <p className={`voucher-mine${mine.cameBack ? " came-back" : ""}`}>
+                  <span className="caption">{mine.label}</span>
+                  {mine.line}
+                </p>
+              ) : null}
               <p className="voucher-status">{page.status}</p>
               {settled ? <p className="voucher-figure">{settled}</p> : null}
               <p className="voucher-promise">{page.promise}</p>
@@ -158,7 +166,8 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
                   <p className="quiet">{page.duesNote}</p>
                 </div>
               ) : null}
-              {page.refunds && !(myRow && myRow.send && ctx.account) ? <p className="quiet">{page.refunds}</p> : null}
+              {/* The note on sending a refund is for someone who may still have one to send, not for a backer already paid. */}
+              {page.refunds && !(myRow && myRow.send && ctx.account) && !(mine && mine.cameBack) ? <p className="quiet">{page.refunds}</p> : null}
             </section>
           )}
         </div>

@@ -7,7 +7,9 @@
 //   no-owner the ABI has no privileged function, and the deployed code has no opcode that could
 //            run someone else's code as the contract or destroy it
 //   custody  the contract holds at least what it owes, read at one block
-//   ledger   the event-sourced ledger rebuilt from the logs matches the contract's own state
+//   ledger   the event-sourced ledger rebuilt from the logs matches the contract's own state. The logs
+//            are the node's; an explorer may say which blocks hold them, and the contract's own
+//            count of its events is what shows none was left out
 //   signed-pledge  (when named) SignedPledge's code is the compiled code, bound to this token and this Boomerang
 import { keccak256 } from "viem";
 import type { Abi, Address, PublicClient } from "viem";
@@ -253,38 +255,177 @@ export async function custodyCheck(client: PublicClient, boomerang: Address, usd
   return { name: "custody", ok, detail: `holds ${held}, owes ${owed}, at block ${blockNumber}` };
 }
 
-// Pull every Boomerang log in [fromBlock, toBlock] in chunks, each with its block's timestamp.
-// `onChunk`, when given, is called after each log request with how many are done and how many in
-// all, so a caller can show progress; absent (the command line's default) nothing is reported.
-async function logsWithTime(
-  client: PublicClient,
-  boomerang: Address,
-  fromBlock: bigint,
-  toBlock: bigint,
-  chunk: bigint,
-  onChunk?: (done: number, of: number) => void,
-): Promise<RawLog[]> {
+export type Range = { from: bigint; to: bigint };
+
+/**
+ * How the ledger row reads the contract's logs.
+ *
+ * `hints` names blocks said to hold the contract's events. Whoever names them (an explorer) is
+ * not trusted: the logs themselves are asked of the node, and the read counts as whole only when
+ * the events are numbered 1 to N with none missing and N is the contract's own `eventCount` at
+ * the same block. Short of that the row reads the blocks after the last named one, and failing
+ * that every block, as it does when nobody names any.
+ *
+ * `gapMs` is the pause between two log requests (none unless set): a public node takes only so
+ * many a second. `wait` stands in for the clock in tests.
+ */
+export type LedgerRead = {
+  hints?: { from: string; blocks: () => Promise<readonly bigint[]> };
+  gapMs?: number;
+  wait?: (ms: number) => Promise<void>;
+};
+
+// What a refused log request is given before it is asked again: 63 seconds in all, which outlasts
+// a limit counted by the clock minute.
+const REFUSAL_WAITS = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000];
+
+/** The named blocks inside [fromBlock, toBlock], as the fewest ranges of at most `chunk` blocks that hold them all. */
+export function hintRanges(hints: readonly bigint[], fromBlock: bigint, toBlock: bigint, chunk: bigint): Range[] {
   if (chunk < 1n) throw new Error("the log chunk must be at least 1 block");
-  const times = new Map<bigint, bigint>();
-  const raw: RawLog[] = [];
-  const of = toBlock < fromBlock ? 0 : Number((toBlock - fromBlock) / chunk) + 1;
-  let done = 0;
-  for (let start = fromBlock; start <= toBlock; start += chunk) {
-    const end = start + chunk - 1n < toBlock ? start + chunk - 1n : toBlock;
-    const logs = await client.getLogs({ address: boomerang, fromBlock: start, toBlock: end });
-    for (const lg of logs) {
-      const bn = lg.blockNumber!;
-      let t = times.get(bn);
-      if (t === undefined) {
-        t = (await client.getBlock({ blockNumber: bn })).timestamp;
-        times.set(bn, t);
-      }
-      raw.push({ address: lg.address, topics: lg.topics, data: lg.data, blockNumber: bn, blockTimestamp: t });
-    }
-    done += 1;
-    onChunk?.(done, of);
+  const blocks = [...new Set(hints.filter((h) => typeof h === "bigint" && h >= fromBlock && h <= toBlock))].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+  const out: Range[] = [];
+  for (const b of blocks) {
+    const last = out[out.length - 1];
+    if (last !== undefined && b <= last.from + chunk - 1n) last.to = b;
+    else out.push({ from: b, to: b });
   }
-  return raw;
+  return out;
+}
+
+/** [fromBlock, toBlock] cut into ranges of `chunk` blocks; none when the range is empty. */
+function chunksOf(fromBlock: bigint, toBlock: bigint, chunk: bigint): Range[] {
+  if (chunk < 1n) throw new Error("the log chunk must be at least 1 block");
+  const out: Range[] = [];
+  for (let start = fromBlock; start <= toBlock; start += chunk) {
+    out.push({ from: start, to: start + chunk - 1n < toBlock ? start + chunk - 1n : toBlock });
+  }
+  return out;
+}
+
+// A node saying "too many requests": HTTP or JSON-RPC 429, those words, or JSON-RPC -32005 (which
+// some nodes also use for an answer that is too large: that one is not a matter of waiting), on
+// the error or on what caused it.
+function isRateLimit(e: unknown): boolean {
+  let at: unknown = e;
+  for (let depth = 0; depth < 6 && at !== null && typeof at === "object"; depth++) {
+    const err = at as { code?: unknown; status?: unknown; message?: unknown; details?: unknown; shortMessage?: unknown; cause?: unknown };
+    const texts = [err.message, err.details, err.shortMessage].filter((t): t is string => typeof t === "string");
+    if (err.status === 429 || err.code === 429) return true;
+    if (texts.some((t) => /rate limit|too many requests/i.test(t))) return true;
+    if (err.code === -32005 && !texts.some((t) => /result|range|block/i.test(t))) return true;
+    at = err.cause;
+  }
+  return false;
+}
+
+// A block's time as a log may carry it (Arc's logs do): a bigint, a hex string or a whole number.
+function ownTime(log: unknown): bigint | null {
+  const t = (log as { blockTimestamp?: unknown }).blockTimestamp;
+  if (typeof t === "bigint") return t >= 0n ? t : null;
+  if (typeof t === "number") return Number.isSafeInteger(t) && t >= 0 ? BigInt(t) : null;
+  if (typeof t === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(t)) return BigInt(t);
+  return null;
+}
+
+/**
+ * Reads the contract's logs range by range, each log with its block's time. One reader serves one
+ * run of the row: it keeps the pace across every range it is given (`gapMs` between two requests,
+ * a refused request asked again after 1, 2, 4... seconds) and asks for a block's time once.
+ */
+function logReader(client: PublicClient, boomerang: Address, read: LedgerRead, onChunk?: (done: number, of: number) => void) {
+  const wait = read.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const gapMs = read.gapMs ?? 0;
+  const times = new Map<bigint, bigint>();
+  let asked = false;
+
+  const logsOf = async (r: Range) => {
+    for (let attempt = 0; ; attempt++) {
+      if (asked && gapMs > 0 && attempt === 0) await wait(gapMs);
+      asked = true;
+      try {
+        return await client.getLogs({ address: boomerang, fromBlock: r.from, toBlock: r.to });
+      } catch (e) {
+        if (!isRateLimit(e)) throw e;
+        if (attempt >= REFUSAL_WAITS.length) throw new Error("the node refused the log requests for over a minute (its rate limit); try again in a minute");
+        await wait(REFUSAL_WAITS[attempt]);
+      }
+    }
+  };
+
+  return async (ranges: readonly Range[]): Promise<RawLog[]> => {
+    const raw: RawLog[] = [];
+    let done = 0;
+    for (const r of ranges) {
+      for (const lg of await logsOf(r)) {
+        const bn = lg.blockNumber!;
+        let t = times.get(bn);
+        if (t === undefined) {
+          t = ownTime(lg) ?? (await client.getBlock({ blockNumber: bn })).timestamp;
+          times.set(bn, t);
+        }
+        raw.push({ address: lg.address, topics: lg.topics, data: lg.data, blockNumber: bn, blockTimestamp: t });
+      }
+      done += 1;
+      onChunk?.(done, ranges.length);
+    }
+    return raw;
+  };
+}
+
+// The ledger the logs make, or null when they cannot be applied at all (a part of them is not a ledger).
+function ledgerOf(raw: readonly RawLog[], boomerang: Address) {
+  try {
+    const ledger = emptyLedger();
+    applyEvents(ledger, decodeLogs([...raw], boomerang));
+    return ledger;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The blocks an explorer (Blockscout's API, as Arc's runs it) lists logs of `contract` in. Only
+ * the block numbers are taken, each checked to be a plain number; nothing else of the answer is
+ * kept or repeated, in a failure either. It throws when the explorer cannot be read or lists more
+ * than `maxPages` pages; the caller then reads every block instead.
+ */
+export async function explorerBlocks(
+  explorer: string,
+  contract: Address,
+  fetch: (url: string) => Promise<{ status: number; json(): Promise<unknown> }>,
+  maxPages = 40,
+): Promise<bigint[]> {
+  const base = `${explorer}/api/v2/addresses/${contract}/logs`;
+  const blocks: bigint[] = [];
+  let query = "";
+  for (let pageNo = 0; pageNo < maxPages; pageNo++) {
+    const res = await fetch(base + query);
+    if (res.status !== 200) throw new Error(`the explorer answered with status ${res.status}`);
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    const b = body as { items?: unknown; next_page_params?: unknown } | null;
+    if (b === null || typeof b !== "object" || !Array.isArray(b.items)) throw new Error("the explorer's list of logs could not be read");
+    for (const item of b.items) {
+      const n = (item as { block_number?: unknown } | null)?.block_number;
+      if (typeof n === "string" && /^[0-9]{1,15}$/.test(n)) blocks.push(BigInt(n));
+      else if (typeof n === "number" && Number.isSafeInteger(n) && n >= 0) blocks.push(BigInt(n));
+      else throw new Error("the explorer's list of logs could not be read");
+    }
+    const next = b.next_page_params;
+    if (next === null || next === undefined) return blocks;
+    if (typeof next !== "object" || Array.isArray(next)) throw new Error("the explorer's list of logs could not be read");
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(next as Record<string, unknown>)) {
+      if (typeof v !== "string" && typeof v !== "number") throw new Error("the explorer's list of logs could not be read");
+      params.set(k, String(v));
+    }
+    query = `?${params.toString()}`;
+  }
+  throw new Error("the explorer lists more pages of logs than this check follows");
 }
 
 export async function ledgerCheck(
@@ -295,16 +436,55 @@ export async function ledgerCheck(
   toBlock: bigint,
   chunk: bigint,
   onChunk?: (done: number, of: number) => void,
+  how: LedgerRead = {},
 ): Promise<Check> {
-  const raw = await logsWithTime(client, boomerang, fromBlock, toBlock, chunk, onChunk);
-  const ledger = emptyLedger();
-  applyEvents(ledger, decodeLogs(raw, boomerang));
+  if (chunk < 1n) throw new Error("the log chunk must be at least 1 block");
+  const read = <T>(fn: string, args: readonly unknown[] = []) => client.readContract({ address: boomerang, abi, functionName: fn, args, blockNumber: toBlock }) as Promise<T>;
+  const logsIn = logReader(client, boomerang, how, onChunk);
+  // The contract's own count of its events at this block: what makes a read of only some blocks whole.
+  const eventCount = await read<bigint>("eventCount");
+  const whole = (l: ReturnType<typeof ledgerOf>): boolean => l !== null && missing(l) === null && l.lastSeq === eventCount;
+
+  let ledger: ReturnType<typeof ledgerOf> = null;
+  let readAs = "";
+  if (how.hints !== undefined) {
+    let named: readonly bigint[] = [];
+    try {
+      named = await how.hints.blocks();
+    } catch {
+      named = [];
+    }
+    const ranges = Array.isArray(named) ? hintRanges(named, fromBlock, toBlock, chunk) : [];
+    // Naming more ranges than a read of every block would take is no help.
+    const fullCount = toBlock < fromBlock ? 0n : (toBlock - fromBlock) / chunk + 1n;
+    if (ranges.length > 0 && BigInt(ranges.length) < fullCount) {
+      const where = `${ranges.length} range(s) of blocks named by ${how.hints.from}`;
+      let raw = await logsIn(ranges);
+      let made = ledgerOf(raw, boomerang);
+      if (made !== null && whole(made)) {
+        ledger = made;
+        readAs = `the logs were read from the node at ${where}, and the contract's own count of ${eventCount} event(s) shows none is missing`;
+      } else if (made !== null && missing(made) === null && made.lastSeq < eventCount) {
+        // Numbered from 1 with no hole, but short of the count: the rest is after the last named block.
+        raw = raw.concat(await logsIn(chunksOf(ranges[ranges.length - 1].to + 1n, toBlock, chunk)));
+        made = ledgerOf(raw, boomerang);
+        if (made !== null && whole(made)) {
+          ledger = made;
+          readAs = `the logs were read from the node at ${where} and every block after them, and the contract's own count of ${eventCount} event(s) shows none is missing`;
+        }
+      }
+    }
+  }
+  if (ledger === null) {
+    const raw = await logsIn(chunksOf(fromBlock, toBlock, chunk));
+    ledger = emptyLedger();
+    applyEvents(ledger, decodeLogs(raw, boomerang));
+    readAs = `every block from ${fromBlock} was read`;
+  }
 
   const gap = missing(ledger);
   if (gap !== null) return { name: "ledger", ok: false, detail: `the ledger is waiting for seq ${gap.from}..${gap.to}; a log is missing from the scanned range` };
 
-  const read = <T>(fn: string, args: readonly unknown[] = []) => client.readContract({ address: boomerang, abi, functionName: fn, args, blockNumber: toBlock }) as Promise<T>;
-  const eventCount = await read<bigint>("eventCount");
   if (ledger.lastSeq !== eventCount) return { name: "ledger", ok: false, detail: `lastSeq ${ledger.lastSeq} but the contract's eventCount is ${eventCount}` };
   const totalOwed = await read<bigint>("totalOwed");
   if (ledger.totalOwed !== totalOwed) return { name: "ledger", ok: false, detail: `ledger totalOwed ${ledger.totalOwed} but the contract owes ${totalOwed}` };
@@ -342,7 +522,7 @@ export async function ledgerCheck(
       backersCompared++;
     }
   }
-  return { name: "ledger", ok: true, detail: `${campaignCount} campaign(s), ${backersCompared} backer(s), seq 1..${ledger.lastSeq} match the contract at block ${toBlock}` };
+  return { name: "ledger", ok: true, detail: `${campaignCount} campaign(s), ${backersCompared} backer(s), seq 1..${ledger.lastSeq} match the contract at block ${toBlock}; ${readAs}` };
 }
 
 const helperAbi = [
@@ -391,11 +571,16 @@ export async function checkLive(o: {
   /** The hash of the transaction that created the contract, as the deploy script recorded it. */
   deployTx?: `0x${string}` | null;
   chunk?: bigint;
+  /** How the ledger row reads the logs: blocks someone names, the pace, the clock (see LedgerRead). */
+  read?: LedgerRead;
+  /** Called after each log request of the ledger row with how many are done and how many in all. */
+  onChunk?: (done: number, of: number) => void;
   /** SignedPledge, when deployed: adds a sixth row. */
   helper?: { address: Address; artifact: Artifact };
 }): Promise<Check[]> {
   const { client, boomerang, usdc, fromBlock, artifact } = o;
-  const chunk = o.chunk ?? 5000n;
+  // 10,000 blocks is the most Arc's node takes in one log request (measured 2026-11-18).
+  const chunk = o.chunk ?? 10_000n;
   const abi = artifact.abi as Abi;
 
   const guard = async (name: string, run: () => Promise<Check>): Promise<Check> => {
@@ -428,7 +613,7 @@ export async function checkLive(o: {
     return o.helper ? [...failed, { name: "signed-pledge", ok: false, detail }] : failed;
   }
   const custody = await guard("custody", () => custodyCheck(client, boomerang, usdc, abi, blockNumber));
-  const ledger = await guard("ledger", () => ledgerCheck(client, boomerang, abi, fromBlock, blockNumber, chunk));
+  const ledger = await guard("ledger", () => ledgerCheck(client, boomerang, abi, fromBlock, blockNumber, chunk, o.onChunk, o.read));
   if (!o.helper) return [code, creation, noOwner, custody, ledger];
   const { address, artifact: helperArtifact } = o.helper;
   const helper = await guard("signed-pledge", () => helperCheck(client, address, usdc, boomerang, helperArtifact, blockNumber));

@@ -1029,6 +1029,15 @@ describe("cli scripts", function () {
       assert.doesNotMatch(res.stderr, /\n\s+at /, `${name}: no stack trace`);
       assert.equal(res.stdout, "", `${name}: no check was printed`);
     }
+    // A flag where the node's address should be is not taken for an address.
+    {
+      const file = join(dir, "addresses.json");
+      writeFileSync(file, JSON.stringify({ "5042002": { boomerang: B, usdc: ARC_USDC, deployBlock: "12", boomerangTx: TX } }));
+      const res = spawnSync("node", ["scripts/check-live.mjs", "--rpc", "--full"], { cwd: repoRoot, encoding: "utf8", env: { ...process.env, BOOMERANG_ADDRESSES_FILE: file } });
+      assert.equal(res.status, 2, res.stderr);
+      assert.match(res.stderr, /--rpc needs the address of a node/);
+      assert.equal(res.stdout, "");
+    }
     // The repository's own file, as it stands before any deployment, gives the same answer.
     const real = JSON.parse(readFileSync(ADDRESSES_URL, "utf8"))["5042002"];
     if (real.boomerang === null) {

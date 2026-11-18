@@ -93,6 +93,10 @@ footer.foot .fl { display: flex; flex-wrap: wrap; gap: 6px 20px; align-content: 
 .stopped { max-width: 60ch; margin: 0 auto; padding: clamp(48px, 12vh, 140px) var(--gutter); display: grid; gap: 14px; }
 .stopped h1 { font-family: var(--display); font-weight: 600; font-size: clamp(2rem, 1.3rem + 2.6vw, 3.2rem); letter-spacing: -0.03em; line-height: 1.02; }
 
+/* On a phone the bar wraps to three rows, a fifth of the screen: it stays at the top of the page and does not follow. */
+@media (max-width: 600px) {
+  nav.top { position: static; backdrop-filter: none; background: var(--paper); }
+}
 @media (max-width: 900px) {
   nav.top .wrap { flex-wrap: wrap; gap: 6px 18px; padding-block: 10px; }
   .links { order: 3; width: 100%; gap: 20px; overflow-x: auto; }

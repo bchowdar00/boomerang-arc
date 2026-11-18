@@ -1,7 +1,10 @@
 // The keyless checks, run in the visitor's own browser against the chain. Five of the six the
 // command line runs can run here: the code and no-owner rows from the kit's fingerprint, custody
 // and the event-rebuilt ledger from the contract's own reads, and the explorer's own word on the
-// verified source. The sixth (that this repository's code created the contract) needs the compiled
+// verified source. The ledger row asks the explorer, where there is one, which blocks hold the
+// contract's logs, reads those logs from the node, and counts the read whole only when the
+// contract's own count of its events says so; with no explorer, or one that cannot be read, it
+// reads every block. The sixth (that this repository's code created the contract) needs the compiled
 // creation code, which a browser does not hold; the commands on the page run it.
 //
 // This module imports the ledger and the check functions, so the page loads it on its own with a
@@ -10,7 +13,7 @@
 import type { Abi, Address, PublicClient } from "viem";
 
 import { BOOMERANG_FINGERPRINT, boomerangAbi } from "../../../packages/kit/src/index.ts";
-import { custodyCheck, fingerprintCheck, ledgerCheck, noOwnerByFingerprint } from "../../../scripts/lib/check.ts";
+import { custodyCheck, explorerBlocks, fingerprintCheck, ledgerCheck, noOwnerByFingerprint } from "../../../scripts/lib/check.ts";
 
 export type CheckId = "code" | "no-owner" | "custody" | "ledger" | "explorer";
 export type CheckResult = { id: CheckId; ok: boolean; detail: string };
@@ -69,6 +72,10 @@ export async function runChecks(o: {
   chunk?: bigint; // default 10_000n blocks per log request
   /** How long the explorer is given to answer before its row fails; 15 seconds unless set. */
   explorerWaitMs?: number;
+  /** The pause between two log requests, for a public node that takes only a few a second; none unless set. */
+  gapMs?: number;
+  /** Stands in for the clock in tests. */
+  wait?: (ms: number) => Promise<void>;
 }): Promise<CheckResult[]> {
   const chunk = o.chunk ?? 10_000n;
   const explorerWaitMs = o.explorerWaitMs ?? 15_000;
@@ -125,9 +132,29 @@ export async function runChecks(o: {
       }),
     );
     results.push(
-      await guard("ledger", () =>
-        ledgerCheck(o.client, o.boomerang, abi, o.fromBlock, at, chunk, (done, of) => o.onProgress?.({ id: "ledger", done, of })),
-      ),
+      await guard("ledger", () => {
+        // The explorer only says where to look, and is given the same limit as its own row; late,
+        // unreadable or absent, the row reads every block.
+        const explorer = o.explorer;
+        const hints =
+          explorer === null
+            ? undefined
+            : {
+                from: "Arc's explorer",
+                blocks: () => {
+                  let timer: ReturnType<typeof setTimeout> | undefined;
+                  const late = new Promise<never>((_, reject) => {
+                    timer = setTimeout(() => reject(new Error("the explorer did not answer in time")), explorerWaitMs);
+                  });
+                  return Promise.race([explorerBlocks(explorer, o.boomerang, o.fetch), late]).finally(() => clearTimeout(timer));
+                },
+              };
+        return ledgerCheck(o.client, o.boomerang, abi, o.fromBlock, at, chunk, (done, of) => o.onProgress?.({ id: "ledger", done, of }), {
+          hints,
+          gapMs: o.gapMs,
+          wait: o.wait,
+        });
+      }),
     );
   }
 

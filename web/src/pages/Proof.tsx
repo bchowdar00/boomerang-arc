@@ -63,6 +63,8 @@ function Checks({ config }: { config: Config }) {
         usdc: config.usdc,
         fromBlock: config.deployBlock,
         explorer: config.chain.explorer,
+        // Arc's public node takes about three log requests a second from one visitor.
+        gapMs: config.chain.local ? 0 : 350,
         fetch: (url) => fetch(url, { credentials: "omit", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(15_000) }),
         onProgress: (progress) => {
           if (alive.current && run.current === mine) setState({ phase: "running", progress });

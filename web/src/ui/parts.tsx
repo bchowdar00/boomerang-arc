@@ -14,7 +14,8 @@ export function Rows({ rows, explorer }: { rows: readonly Row[]; explorer: strin
       {rows.map((r) => {
         const link = explorerLink(explorer, "address", r.address);
         return (
-          <div className="row" key={r.label}>
+          // A value that is a sentence reads from the left under its label; a short one sits flush right beside it.
+          <div className={r.value.length > 60 ? "row row-long" : "row"} key={r.label}>
             <dt>{r.label}</dt>
             <dd>
               {link ? (
