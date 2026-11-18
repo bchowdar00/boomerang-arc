@@ -22,10 +22,12 @@ import { oneAtATime } from "../flows/calls.ts";
 import { boardTime } from "../views/board.ts";
 import { pledgeForm, pledgeRoute, requote, stillValidLine, type Answer } from "../views/pledge.ts";
 import { receiptView } from "../views/receipt.ts";
+import { PRACTICE } from "../views/practice.ts";
 import { deskOffer, signedButton, WORDS } from "../views/shell.ts";
 import { useDesk } from "./desk.ts";
 import { Waves } from "./Guilloche.tsx";
 import { SendStatus } from "./parts.tsx";
+import { Practice } from "./Practice.tsx";
 
 /** "9:12", "5 hrs", "3 days": the board's own clock, as the cheque's head writes it. */
 function span(seconds: bigint): string {
@@ -147,6 +149,7 @@ export function Cheque({
     onRightChain: ctx.onRightChain,
     answer: answered !== null && typed !== null && answered.amount === typed ? answered.answer : null,
     hasWallet: ctx.hasWallet,
+    practice: ctx.practice !== null,
     // On Arc gas is paid in USDC. A pledge the visitor sends themself (the two-step route) needs some left over; one the keeper relays does not.
     gasReserve: !config.chain.local && pledgeRoute({ signedPledge: config.signedPledge, relay: ctx.relay, fellBack: twoStep }) !== "signed" ? GAS_RESERVE : 0n,
   });
@@ -159,7 +162,8 @@ export function Cheque({
 
   const submit = () => {
     const account = ctx.account;
-    if (account === null) return ctx.connect();
+    // Nobody connected: the button connects the browser's wallet, or, where there is none, starts a practice one.
+    if (account === null) return ctx.hasWallet ? ctx.connect() : ctx.practice?.();
     const { amount, quote, calls } = form;
     if (!form.canSend || amount === null || quote === null) return;
     void once(async () => {
@@ -291,7 +295,7 @@ export function Cheque({
             <span className="cq-line">{receipt.line}</span>
           )}
         </div>
-        <button className="btn btn-ink" type="submit" disabled={ctx.account !== null ? !form.canSend || !ctx.maySend : !ctx.hasWallet}>
+        <button className="btn btn-ink" type="submit" disabled={ctx.account !== null ? !form.canSend || !ctx.maySend : ctx.hasWallet ? false : ctx.practice === null || ctx.practiceBusy}>
           {button}
           <span className="arrow" aria-hidden="true">
             →
@@ -313,7 +317,9 @@ export function Cheque({
           </ul>
         ) : null}
         {form.source === "contract" ? <p className="quiet">{WORDS.pledge.fromContract}</p> : form.source === "estimate" ? <p className="quiet">{WORDS.pledge.estimate}</p> : null}
-        {route === "signed" && ctx.account !== null ? <p className="quiet">{WORDS.pledge.oneSignature}</p> : null}
+        {route === "signed" && ctx.account !== null ? <p className="quiet">{ctx.practising ? PRACTICE.oneSignature : WORDS.pledge.oneSignature}</p> : null}
+        {/* With a wallet in the browser the cheque's button connects it, and the practice wallet is offered under it. */}
+        {ctx.account === null && ctx.hasWallet ? <Practice ctx={ctx} /> : null}
         {fellBack ? (
           <p className="problem" role="status">
             {fellBack}

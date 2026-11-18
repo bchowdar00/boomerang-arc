@@ -20,8 +20,10 @@ import { Proof } from "../pages/Proof.tsx";
 import { scrollToSection } from "../ui/motion.ts";
 import { explorerLink } from "../views/links.ts";
 import { fallbackLine, relayLine, relayRefusedBeforeSending } from "../views/pledge.ts";
+import { PRACTICE, practiceResult } from "../views/practice.ts";
 import { shell, stepLine, WORDS } from "../views/shell.ts";
 import { connect as askWallet, connected, declined, discover, ensureChain, type FoundWallet } from "../wallet/injected.ts";
+import { browserKeyStore, PRACTICE_ID, practiceWallet } from "../wallet/practice.ts";
 import { chainOf, clientFor } from "./chain.ts";
 import type { Config } from "./config.ts";
 import type { Ctx, RelayOutcome, SendState, SignedGuard } from "./context.ts";
@@ -94,19 +96,33 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
     }
   }, []);
 
-  // Find the wallets once. One that already shares an account with this page is used without asking.
+  // The practice wallet: a key this page makes and keeps in this browser, for a visitor with no
+  // wallet of their own. It is kept apart from the browser's wallets, so "Connect a wallet" never
+  // opens it by accident; a page offers it by name.
+  const practiceStore = useMemo(() => browserKeyStore(browserStorage(), config.chain.id), [config]);
+  const practiceW = useMemo(
+    () => practiceWallet({ name: PRACTICE.name, chain, usdc: config.usdc, store: practiceStore, rpc: (method, params) => client.request({ method, params } as never) as Promise<unknown> }),
+    [chain, client, config, practiceStore],
+  );
+  const practising = wallet?.id === PRACTICE_ID;
+  const [practiceBusy, setPracticeBusy] = useState(false);
+  const [practiceNote, setPracticeNote] = useState<{ ok: boolean; line: string } | null>(null);
+
+  // Find the wallets once. One that already shares an account with this page is used without
+  // asking; failing that, a practice wallet this browser kept from an earlier visit.
   useEffect(() => {
     let gone = false;
     void discover(window, (type) => new Event(type)).then(async (found) => {
       if (gone) return;
       setWallets(extraWallet ? [...found, extraWallet] : found);
       setLooked(true);
-      for (const w of found) if (await use(w, false)) break;
+      for (const w of found) if (await use(w, false)) return;
+      if (!gone) await use(practiceW, false);
     });
     return () => {
       gone = true;
     };
-  }, [extraWallet, use]);
+  }, [extraWallet, use, practiceW]);
 
   // Follow the wallet when the person changes its account or its network.
   useEffect(() => {
@@ -131,9 +147,10 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
   }, [wallet]);
 
   const connect = useCallback(() => {
+    if (practiceBusy) return; // one wallet at a time: a practice wallet being set up is not raced by another
     if (wallets.length === 1) void use(wallets[0], true);
     else if (wallets.length > 1) setChoosing(true);
-  }, [wallets, use]);
+  }, [wallets, use, practiceBusy]);
 
   const switchNetwork = useCallback(async () => {
     if (!wallet) return;
@@ -155,6 +172,11 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
   const shownId = route.page === "campaign" || route.page === "pledge" ? route.id : null;
   const shownRef = useRef<bigint | null>(null);
   shownRef.current = shownId;
+  // My money's reads: the address looked up, if any, and otherwise an example backer for a visitor with nobody connected.
+  const onMine = route.page === "mine";
+  const who = route.page === "mine" ? (route.who ?? null) : null;
+  const mineRef = useRef<{ on: boolean; who: Address | null }>({ on: false, who: null });
+  mineRef.current = { on: onMine, who };
   const poll = useRef<Poll | null>(null);
   useEffect(() => {
     const p = startPoll({
@@ -168,6 +190,9 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
             account: accountRef.current,
             keeper: () => askKeeper({ url: config.keeperUrl, fetch: netFetch }),
             also: shownRef.current,
+            lookup: mineRef.current.who,
+            example: mineRef.current.on,
+            backersOf: shownRef.current,
           });
           if (!live()) return; // given up on: a newer read is under way or already shown
           setWorld(w);
@@ -187,6 +212,28 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
   useEffect(() => {
     refresh(); // a new account's figures are read at once
   }, [account, refresh]);
+
+  // Start the practice wallet, or pick it up again. A new one has nothing in it, so the desk is
+  // asked for USDC at once and its answer is shown in the notices.
+  const startPractice = useCallback(async () => {
+    const fresh = practiceStore.get() === null;
+    setPracticeNote(null);
+    setPracticeBusy(true);
+    try {
+      if (!(await use(practiceW, true)) || !fresh) return;
+      const address = await connected(practiceW.provider);
+      if (address === null) return;
+      const desk = await askForUsdc({ url: config.keeperUrl, fetch: netFetch, address });
+      setPracticeNote(practiceResult({ asked: true, desk }));
+      refresh();
+    } finally {
+      setPracticeBusy(false);
+    }
+  }, [practiceStore, practiceW, use, config, refresh]);
+  // A page with reads of its own (a campaign's backers, another account's money) gets them at once, not at the next tick.
+  useEffect(() => {
+    if (shownId !== null || onMine) refresh();
+  }, [shownId, onMine, who, refresh]);
   // A campaign the last read did not take in (an old one, or one just opened) is read at once.
   const shownMissing = shownId !== null && world !== null && campaignIn(world, shownId) === undefined;
   useEffect(() => {
@@ -226,7 +273,7 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
             onStep: (step) =>
               put((s) => {
                 const lines = [...s.lines];
-                lines[step.index] = stepLine(step, calls.length);
+                lines[step.index] = stepLine(step, calls.length, practising);
                 return { ...s, lines };
               }),
           });
@@ -241,7 +288,7 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
       });
       return went ?? false;
     },
-    [wallet, account, chain, client, refresh, gate],
+    [wallet, account, chain, client, refresh, gate, practising],
   );
 
   // A pledge from one signature: the wallet signs, the keeper sends. Anything short of a pledge on
@@ -257,7 +304,7 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
       const went = await gate(async (): Promise<RelayOutcome> => {
         setBusyKey(key);
         const set = (s: Partial<SendState>) => setSends((all) => ({ ...all, [key]: { key, lines: [], error: null, busy: true, done: false, ...s } }));
-        set({ lines: [WORDS.pledge.signing] });
+        set({ lines: [practising ? PRACTICE.signing : WORDS.pledge.signing] });
         try {
           await ensureChain(wallet.provider, chain);
           setWalletChainId(chainNumber(await wallet.provider.request({ method: "eth_chainId" })));
@@ -323,7 +370,7 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
       });
       return went ?? { kind: "stopped" };
     },
-    [wallet, account, chain, client, config, worldNow, refresh, gate, outstanding],
+    [wallet, account, chain, client, config, worldNow, refresh, gate, outstanding, practising],
   );
 
   const signedGuard = useCallback(
@@ -389,6 +436,15 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
     window.scrollTo(0, 0);
   }, [hrefFor(route), landed]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A practice wallet is on offer where nobody is connected and either the desk is up to fund a
+  // new one or this browser already keeps one.
+  const deskUp = world !== null && world.keeper.up && world.keeper.health.desk !== null;
+  // Not before the search for the browser's own wallets has ended: until then nothing says there is none.
+  const practiceOffered = looked && account === null && (deskUp || practiceStore.get() !== null);
+  useEffect(() => {
+    setPracticeNote(null); // the desk's answer belongs to the page it was given on
+  }, [route]);
+
   const frame = shell({
     route,
     chain: config.chain,
@@ -396,6 +452,8 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
     wallets: wallets.length,
     account,
     walletChainId,
+    practice: practiceOffered,
+    practising,
     block: world?.block ?? null,
     readFailed,
   });
@@ -418,6 +476,9 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
       sendState: (key) => sends[key] ?? null,
       connect,
       hasWallet: wallets.length > 0 || !looked, // until the search for wallets has ended, nothing says there is none
+      practice: practiceOffered ? () => void startPractice() : null,
+      practiceBusy,
+      practising,
       expected: (id) => expecting.some((e) => e.id === id && Date.now() < e.until),
       expect,
       quote,
@@ -433,7 +494,7 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
       ) : route.page === "pledge" ? (
         <Pledge ctx={ctx} id={route.id} key={String(route.id)} />
       ) : route.page === "mine" ? (
-        <Mine ctx={ctx} />
+        <Mine ctx={ctx} who={who} key={who ?? "own"} />
       ) : (
         <Proof ctx={ctx} />
       );
@@ -459,7 +520,12 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
           <div className={`wallet wallet-${frame.wallet.state}`}>
             {frame.wallet.account ? <span className="wallet-account">{frame.wallet.account}</span> : null}
             {frame.wallet.button ? (
-              <button type="button" className="btn btn-line" onClick={frame.wallet.state === "wrong-network" ? () => void switchNetwork() : connect}>
+              <button
+                type="button"
+                className="btn btn-line"
+                disabled={frame.wallet.state === "practice" && practiceBusy}
+                onClick={frame.wallet.state === "wrong-network" ? () => void switchNetwork() : frame.wallet.state === "practice" ? () => void startPractice() : connect}
+              >
                 {frame.wallet.button}
               </button>
             ) : null}
@@ -472,6 +538,12 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
         {walletError ? (
           <p className="problem" role="alert">
             {walletError}
+          </p>
+        ) : null}
+        {practiceBusy ? <p role="status">{PRACTICE.busy}</p> : null}
+        {practiceNote ? (
+          <p className={practiceNote.ok ? "notice" : "problem"} role="status">
+            {practiceNote.line}
           </p>
         ) : null}
         {choosing ? (

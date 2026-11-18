@@ -6,6 +6,8 @@ import { Band, OutcomeStamp } from "../ui/Board.tsx";
 import { Chart } from "../ui/Chart.tsx";
 import { Cheque } from "../ui/Cheque.tsx";
 import { Feed, Rows, Section, SendStatus } from "../ui/parts.tsx";
+import { Practice } from "../ui/Practice.tsx";
+import { backersTable } from "../views/backers.ts";
 import { agoOf, boardView, settledLine } from "../views/board.ts";
 import { campaignPage, missingPage } from "../views/campaign.ts";
 import { feedView } from "../views/feed.ts";
@@ -38,12 +40,18 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
   const campaign = campaignIn(world, id);
   if (!campaign) return <Missing ctx={ctx} id={id} />;
   const page = campaignPage({ campaign, labels: ctx.labels, desk: config.desk, now: world.now, block: world.block, keeperUp: world.keeper.up });
-  // Without an account the buttons that send something become one way to connect; with no wallet at all there is nothing to press.
-  const connectButton = ctx.account === null && ctx.hasWallet ? (
-    <button type="button" className="btn btn-line" onClick={ctx.connect}>
-      {WORDS.connect}
-    </button>
-  ) : null;
+  // Without an account the buttons that send something become ways to get one: connect a wallet, or try a practice one.
+  const connectButton =
+    ctx.account === null ? (
+      <>
+        {ctx.hasWallet ? (
+          <button type="button" className="btn btn-line" onClick={ctx.connect}>
+            {WORDS.connect}
+          </button>
+        ) : null}
+        <Practice ctx={ctx} />
+      </>
+    ) : null;
   // The connected account's own pledge to this campaign, in My money's own words; it offers the refund when one is owed.
   const own = ownIn(world, ctx.account);
   const myRow = own.known
@@ -53,6 +61,7 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
   const board = boardView({ campaign, now: world.now });
   const ledger = world.keeper.up ? world.keeper.ledger : null;
   const feed = feedView({ ledger, campaign: id, limit: 4 });
+  const backers = backersTable({ campaign, shown: world.shownBackers, keeperUp: world.keeper.up, block: world.block });
   const key = `settle:${id}`;
   const sending = ctx.sendState(key);
   const taking = page.phase === "early" || page.phase === "open" || page.phase === "waiting";
@@ -165,6 +174,41 @@ export function Campaign({ ctx, id, focus = false }: { ctx: Ctx; id: bigint; foc
           <p className="quiet">{page.name.labelled ? WORDS.campaign.siteWords : page.name.example ? WORDS.campaign.deskWords : WORDS.campaign.chainWords}</p>
         </Section>
       </div>
+
+      <Section title={backers.title}>
+        {backers.rows.length > 0 ? (
+          <table className="backers">
+            <thead>
+              <tr>
+                {backers.head.map((h) => (
+                  <th scope="col" key={h}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {backers.rows.map((r) => (
+                <tr key={r.key} className={`kind-${r.kind}`}>
+                  <td className="b-account">{r.href ? <a href={r.href}>{r.account}</a> : r.account}</td>
+                  <td className="b-pledged">{r.pledged}</td>
+                  <td className="b-when">{r.when}</td>
+                  <td className="b-back">{r.back}</td>
+                </tr>
+              ))}
+            </tbody>
+            {backers.total ? (
+              <tfoot>
+                <tr>
+                  <td className="b-total-label">{backers.total.label}</td>
+                  <td className="b-total-pledged">{backers.total.pledged}</td>
+                </tr>
+              </tfoot>
+            ) : null}
+          </table>
+        ) : null}
+        {backers.note ? <p className="quiet">{backers.note}</p> : null}
+      </Section>
     </article>
   );
 }

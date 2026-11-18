@@ -42,6 +42,16 @@ export type Ctx = {
   connect(): void;
   /** Whether this browser has any wallet at all; without one `connect` has nothing to open. */
   hasWallet: boolean;
+  /**
+   * Start, or pick up again, the practice wallet: a key this page makes and keeps in this browser,
+   * for test money only. A new one is given USDC by the desk. Null where it cannot be offered (no
+   * desk to fund a new one and no key from an earlier visit) or one is already in use.
+   */
+  practice: (() => void) | null;
+  /** True while the practice wallet is being made and the desk asked. */
+  practiceBusy: boolean;
+  /** Whether the connected account is the practice wallet's. */
+  practising: boolean;
   /** A campaign the desk has just opened and the next read has not shown yet. */
   expected(id: bigint): boolean;
   expect(id: bigint): void;

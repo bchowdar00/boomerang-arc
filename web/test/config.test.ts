@@ -27,6 +27,7 @@ describe("the app's configuration", function () {
       desk: null,
       signedPledge: null,
       keeperUrl: null,
+      deployBlock: 0n,
     });
     assert.equal(configFrom({ VITE_KEEPER_URL: "https://keeper.example.org/" }, deployed).keeperUrl, "https://keeper.example.org");
     assert.equal(configFrom({ VITE_CHAIN_ID: "5042002", VITE_KEEPER_URL: "https://keeper.example.org/base//" }, deployed).keeperUrl, "https://keeper.example.org/base");
@@ -55,6 +56,7 @@ describe("the app's configuration", function () {
       desk: null,
       signedPledge: null,
       keeperUrl: "http://localhost:8787",
+      deployBlock: 0n,
     });
     refuses({ ...local, VITE_RPC_URL: undefined }, /^VITE_RPC_URL is needed/);
     refuses({ ...local, VITE_RPC_URL: "https://rpc.example.org" }, /^VITE_RPC_URL must be on this machine/);

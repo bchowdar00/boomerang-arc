@@ -409,7 +409,10 @@ describe("My money", function () {
   const funded = { ...campaign({}, { outcome: Outcome.Funded, pledged: usd(2000) }), id: 2n };
 
   it("view.mine: with no wallet it asks for one; with one and no pledge it says so", function () {
-    assert.deepEqual(minePage({ account: null, mine: [], labels: [], desk: null, block: 9n }), { account: null, rows: [], empty: "Connect a wallet to see your pledges.", totals: [], asOf: "As of block 9" });
+    assert.deepEqual(minePage({ account: null, mine: [], labels: [], desk: null, block: 9n }), {
+      account: null, rows: [], empty: "Connect a wallet to see your pledges.", totals: [], asOf: "As of block 9",
+      subject: { tag: null, address: null, note: null }, figures: [], connectNote: null,
+    });
     const none = minePage({ account: ME, mine: [], labels: [], desk: null, block: 9n });
     assert.equal(none.account, "0x0000…00c3");
     assert.equal(none.empty, "This account has not pledged to any campaign here.");

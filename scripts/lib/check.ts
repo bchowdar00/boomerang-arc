@@ -18,7 +18,7 @@ import type { Backer, State } from "../../packages/kit/src/types.ts";
 
 export type Check = { name: string; ok: boolean; detail: string };
 
-type Artifact = {
+export type Artifact = {
   abi: readonly unknown[];
   bytecode?: `0x${string}`;
   deployedBytecode: `0x${string}`;
@@ -29,20 +29,20 @@ type Artifact = {
 // campaign's gap) is deliberately not matched: the token-rescue pattern is `rescueTokens`.
 // The names are a first screen only. What the row rests on is the code row (the deployed code is
 // the compiled code) and the opcode scan below.
-const PRIVILEGED =
+export const PRIVILEGED =
   /owner|admin|pause|upgrade|sweep|withdraw|rescueTokens|rescueAll|drain|skim|recover|emergency|setFee|setRecipient|initialize|selfdestruct|destroy|kill|migrate|execute|multicall|grantRole/i;
 
 // Opcodes that let other code run with this contract's storage and balance, or remove it.
-const FORBIDDEN: Record<number, string> = { 0xf2: "CALLCODE", 0xf4: "DELEGATECALL", 0xff: "SELFDESTRUCT" };
+export const FORBIDDEN: Record<number, string> = { 0xf2: "CALLCODE", 0xf4: "DELEGATECALL", 0xff: "SELFDESTRUCT" };
 
 // A 20-byte address, zero-padded to a 32-byte word, as the lowercase hex it sits as in bytecode.
-function paddedWord(addr: Address): string {
+export function paddedWord(addr: Address): string {
   return addr.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
 // Zero out the immutable byte ranges in a runtime-code hex body (no 0x prefix). Each ref is a
 // byte offset and length in the deployed code; one hex char is half a byte.
-function maskImmutables(body: string, refs: { start: number; length: number }[]): string {
+export function maskImmutables(body: string, refs: readonly { start: number; length: number }[]): string {
   const chars = body.split("");
   for (const r of refs) {
     for (let i = r.start * 2; i < (r.start + r.length) * 2 && i < chars.length; i++) chars[i] = "0";
@@ -53,7 +53,7 @@ function maskImmutables(body: string, refs: { start: number; length: number }[])
 // Solidity ends runtime code with a metadata blob (a hash of the sources and the compiler
 // version) and that blob's length in the last two bytes. Split a hex body into code and blob.
 // A comment edited in a source file changes the blob and nothing else.
-function splitMetadata(body: string): { code: string; metadata: string } {
+export function splitMetadata(body: string): { code: string; metadata: string } {
   if (body.length < 4) return { code: body, metadata: "" };
   const size = (parseInt(body.slice(-4), 16) + 2) * 2;
   if (!Number.isFinite(size) || size > body.length) return { code: body, metadata: "" };
@@ -62,7 +62,7 @@ function splitMetadata(body: string): { code: string; metadata: string } {
 
 // Walk the instructions of a hex code body, skipping the data bytes of each PUSH, and name any
 // forbidden opcode found.
-function forbiddenOpcodes(code: string): string[] {
+export function forbiddenOpcodes(code: string): string[] {
   const found = new Set<string>();
   for (let i = 0; i + 1 < code.length; i += 2) {
     const op = parseInt(code.slice(i, i + 2), 16);
@@ -72,7 +72,76 @@ function forbiddenOpcodes(code: string): string[] {
   return [...found];
 }
 
-function codeCheck(onChain: `0x${string}` | undefined, usdc: Address, artifact: Artifact): Check {
+// A browser cannot hold the compiled artifact, so the kit ships a fingerprint of it: the runtime
+// code's length, where its immutable slots sit, how long the trailing metadata blob is, and the
+// hash of the code with the immutables zeroed and that blob removed. `codeHash` is keccak256 of
+// exactly the bytes `codeCheck` compares (the masked, metadata-stripped runtime code), and
+// `metadataHash` is keccak256 of the blob itself, so a browser can tell "byte for byte" from
+// "same instructions, metadata differs" just as `codeCheck` does.
+export type Fingerprint = {
+  bytes: number;
+  immutables: readonly { start: number; length: number }[];
+  metadataBytes: number;
+  codeHash: `0x${string}`;
+  metadataHash: `0x${string}`;
+};
+
+export function fingerprintOf(artifact: Artifact): Fingerprint {
+  const body = artifact.deployedBytecode.replace(/^0x/, "").toLowerCase();
+  const immutables = Object.values(artifact.immutableReferences ?? {})
+    .flat()
+    .map((r) => ({ start: r.start, length: r.length }))
+    .sort((a, b) => a.start - b.start);
+  const split = splitMetadata(maskImmutables(body, immutables));
+  return {
+    bytes: body.length / 2,
+    immutables,
+    metadataBytes: split.metadata.length / 2,
+    codeHash: keccak256(`0x${split.code}`),
+    metadataHash: keccak256(`0x${split.metadata}`),
+  };
+}
+
+// The code row from the fingerprint alone, with no artifact: the same screens as `codeCheck` run
+// against a browser-held fingerprint, with the same three answers: byte for byte, same
+// instructions with other metadata, or different. `code hash` is the whole live code's hash.
+export function fingerprintCheck(onChain: `0x${string}` | undefined, usdc: Address, fp: Fingerprint): Check {
+  const name = "code";
+  if (!onChain || onChain === "0x") return { name, ok: false, detail: "no runtime code at the address" };
+  const hash = keccak256(onChain);
+  const live = onChain.replace(/^0x/, "").toLowerCase();
+  if (live.length !== fp.bytes * 2) {
+    return { name, ok: false, detail: `length ${live.length} vs ${fp.bytes * 2}; code hash ${hash}` };
+  }
+  if (fp.immutables.length === 0) {
+    return { name, ok: false, detail: `the fingerprint lists no immutable slots; rebuild the contracts; code hash ${hash}` };
+  }
+  const want = paddedWord(usdc);
+  const wrongSlot = fp.immutables.find((r) => live.slice(r.start * 2, (r.start + r.length) * 2) !== want);
+  if (wrongSlot) {
+    const holds = live.slice(wrongSlot.start * 2, (wrongSlot.start + wrongSlot.length) * 2);
+    return { name, ok: false, detail: `the token built into the contract is 0x${holds.slice(-40)}, expected ${usdc}; code hash ${hash}` };
+  }
+  // Split as `codeCheck` splits it: by the length the live code states in its own last two bytes.
+  // A blob of another length than the build's cannot be lined up, and fails as it does there.
+  const split = splitMetadata(maskImmutables(live, fp.immutables));
+  if (split.metadata.length !== fp.metadataBytes * 2 || keccak256(`0x${split.code}`) !== fp.codeHash) {
+    return { name, ok: false, detail: `differs from the code this repository builds; code hash ${hash}` };
+  }
+  const exact = keccak256(`0x${split.metadata}`) === fp.metadataHash;
+  const detail = exact
+    ? `matches the code this repository builds byte for byte; token ${usdc} in ${fp.immutables.length} immutable slot(s); code hash ${hash}`
+    : `same instructions as the code this repository builds, but the source metadata differs (a comment, a path or a setting that does not change the code); token ${usdc} in ${fp.immutables.length} immutable slot(s); code hash ${hash}`;
+  return { name, ok: true, detail };
+}
+
+// The no-owner row from the fingerprint alone: the same two screens as `noOwnerCheck`, the opcode
+// scan trimming `fp.metadataBytes` bytes off the end.
+export function noOwnerByFingerprint(onChain: `0x${string}` | undefined, abi: readonly unknown[], fp: Fingerprint): Check {
+  return noOwnerFrom(onChain, abi, fp.metadataBytes);
+}
+
+export function codeCheck(onChain: `0x${string}` | undefined, usdc: Address, artifact: Artifact): Check {
   if (!onChain || onChain === "0x") return { name: "code", ok: false, detail: "no runtime code at the address" };
   const hash = keccak256(onChain);
   const live = onChain.replace(/^0x/, "").toLowerCase();
@@ -140,8 +209,10 @@ async function creationCheck(client: PublicClient, boomerang: Address, usdc: Add
   };
 }
 
-function noOwnerCheck(onChain: `0x${string}` | undefined, artifact: Artifact): Check {
-  const functions = (artifact.abi as { type?: string; name?: string; stateMutability?: string }[]).filter(
+// The two no-owner screens, from the ABI and the runtime code with its last `metadataBytes` bytes
+// trimmed. Shared by the artifact row below and the fingerprint row above, so both read the same.
+export function noOwnerFrom(onChain: `0x${string}` | undefined, abi: readonly unknown[], metadataBytes: number): Check {
+  const functions = (abi as { type?: string; name?: string; stateMutability?: string }[]).filter(
     (x) => x.type === "function",
   );
   const flagged = functions.filter((f) => typeof f.name === "string" && PRIVILEGED.test(f.name)).map((f) => f.name);
@@ -152,11 +223,8 @@ function noOwnerCheck(onChain: `0x${string}` | undefined, artifact: Artifact): C
     return { name: "no-owner", ok: false, detail: `privileged function(s): ${flagged.join(", ")}` };
   }
   if (!onChain || onChain === "0x") return { name: "no-owner", ok: false, detail: "no runtime code at the address" };
-  // The metadata blob at the end is data, not instructions, and is left out of the scan. How
-  // long it is comes from the compiled artifact, never from what the deployed code says of itself.
   const live = onChain.replace(/^0x/, "").toLowerCase();
-  const metadata = splitMetadata(artifact.deployedBytecode.replace(/^0x/, "").toLowerCase()).metadata.length;
-  const opcodes = forbiddenOpcodes(live.slice(0, Math.max(0, live.length - metadata)));
+  const opcodes = forbiddenOpcodes(live.slice(0, Math.max(0, live.length - metadataBytes * 2)));
   if (opcodes.length > 0) {
     return { name: "no-owner", ok: false, detail: `the deployed code contains ${opcodes.join(", ")}` };
   }
@@ -167,11 +235,18 @@ function noOwnerCheck(onChain: `0x${string}` | undefined, artifact: Artifact): C
   };
 }
 
+export function noOwnerCheck(onChain: `0x${string}` | undefined, artifact: Artifact): Check {
+  // The metadata blob at the end is data, not instructions, and is left out of the scan. How
+  // long it is comes from the compiled artifact, never from what the deployed code says of itself.
+  const metadataChars = splitMetadata(artifact.deployedBytecode.replace(/^0x/, "").toLowerCase()).metadata.length;
+  return noOwnerFrom(onChain, artifact.abi, metadataChars / 2);
+}
+
 const BALANCE_OF_ABI = [
   { inputs: [{ name: "a", type: "address" }], name: "balanceOf", outputs: [{ type: "uint256" }], stateMutability: "view", type: "function" },
 ] as const;
 
-async function custodyCheck(client: PublicClient, boomerang: Address, usdc: Address, abi: Abi, blockNumber: bigint): Promise<Check> {
+export async function custodyCheck(client: PublicClient, boomerang: Address, usdc: Address, abi: Abi, blockNumber: bigint): Promise<Check> {
   const held = (await client.readContract({ address: usdc, abi: BALANCE_OF_ABI, functionName: "balanceOf", args: [boomerang], blockNumber })) as bigint;
   const owed = (await client.readContract({ address: boomerang, abi, functionName: "totalOwed", blockNumber })) as bigint;
   const ok = held >= owed;
@@ -179,10 +254,21 @@ async function custodyCheck(client: PublicClient, boomerang: Address, usdc: Addr
 }
 
 // Pull every Boomerang log in [fromBlock, toBlock] in chunks, each with its block's timestamp.
-async function logsWithTime(client: PublicClient, boomerang: Address, fromBlock: bigint, toBlock: bigint, chunk: bigint): Promise<RawLog[]> {
+// `onChunk`, when given, is called after each log request with how many are done and how many in
+// all, so a caller can show progress; absent (the command line's default) nothing is reported.
+async function logsWithTime(
+  client: PublicClient,
+  boomerang: Address,
+  fromBlock: bigint,
+  toBlock: bigint,
+  chunk: bigint,
+  onChunk?: (done: number, of: number) => void,
+): Promise<RawLog[]> {
   if (chunk < 1n) throw new Error("the log chunk must be at least 1 block");
   const times = new Map<bigint, bigint>();
   const raw: RawLog[] = [];
+  const of = toBlock < fromBlock ? 0 : Number((toBlock - fromBlock) / chunk) + 1;
+  let done = 0;
   for (let start = fromBlock; start <= toBlock; start += chunk) {
     const end = start + chunk - 1n < toBlock ? start + chunk - 1n : toBlock;
     const logs = await client.getLogs({ address: boomerang, fromBlock: start, toBlock: end });
@@ -195,12 +281,22 @@ async function logsWithTime(client: PublicClient, boomerang: Address, fromBlock:
       }
       raw.push({ address: lg.address, topics: lg.topics, data: lg.data, blockNumber: bn, blockTimestamp: t });
     }
+    done += 1;
+    onChunk?.(done, of);
   }
   return raw;
 }
 
-async function ledgerCheck(client: PublicClient, boomerang: Address, abi: Abi, fromBlock: bigint, toBlock: bigint, chunk: bigint): Promise<Check> {
-  const raw = await logsWithTime(client, boomerang, fromBlock, toBlock, chunk);
+export async function ledgerCheck(
+  client: PublicClient,
+  boomerang: Address,
+  abi: Abi,
+  fromBlock: bigint,
+  toBlock: bigint,
+  chunk: bigint,
+  onChunk?: (done: number, of: number) => void,
+): Promise<Check> {
+  const raw = await logsWithTime(client, boomerang, fromBlock, toBlock, chunk, onChunk);
   const ledger = emptyLedger();
   applyEvents(ledger, decodeLogs(raw, boomerang));
 

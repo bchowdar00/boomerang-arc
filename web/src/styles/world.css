@@ -101,3 +101,7 @@ footer.foot .fl { display: flex; flex-wrap: wrap; gap: 6px 20px; align-content: 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 1ms !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* The offer of a practice wallet: a line button and what it is, wherever a page would otherwise only say "connect a wallet". */
+.practice { display: grid; gap: 8px; justify-items: start; }
+.practice .quiet { max-width: 46ch; }

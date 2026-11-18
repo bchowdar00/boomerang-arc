@@ -5,6 +5,7 @@ import { quotePledge, type PledgeQuote } from "../data/campaign.ts";
 import type { CampaignView } from "../data/load.ts";
 import { CENT, formatUsd, parseUsd } from "../data/money.ts";
 import { pledgeCalls, type Call } from "../flows/calls.ts";
+import { PRACTICE } from "./practice.ts";
 
 /** The contract's own reply to `quoteIfMissed(id, amount)`. */
 export type Answer = { wouldFund: boolean; counted: bigint; bonus: bigint };
@@ -41,6 +42,8 @@ export function pledgeForm(o: {
   answer: Answer | null;
   /** Whether this browser has any wallet at all. Without one, the form does not offer to connect. */
   hasWallet?: boolean;
+  /** Whether a practice wallet is on offer. With no wallet in the browser it is then what the form's button starts. */
+  practice?: boolean;
   /** USDC the account must keep for gas when it sends the pledge itself on a chain where gas is paid in USDC (Arc). Zero when the keeper sends it, or elsewhere. */
   gasReserve?: bigint;
 }): PledgeForm {
@@ -59,7 +62,8 @@ export function pledgeForm(o: {
 
   const blocks: string[] = [];
   if (quote.kind === "refused") blocks.push(quote.line);
-  if (o.account === null) blocks.push(hasWallet ? "Connect a wallet to pledge." : NO_WALLET);
+  const practice = o.account === null && !hasWallet && o.practice === true;
+  if (o.account === null) blocks.push(hasWallet ? "Connect a wallet to pledge." : practice ? PRACTICE.note : NO_WALLET);
   else if (!o.onRightChain) blocks.push("Your wallet is on another network. Switch it to Arc Testnet.");
   else if (o.balance === null || o.allowance === null) blocks.push("Reading your balance.");
   else if (quote.kind !== "refused" && o.balance < taken) blocks.push(`This account holds ${formatUsd(o.balance)} USDC, which is less than this pledge.`);
@@ -70,7 +74,7 @@ export function pledgeForm(o: {
   const canSend = blocks.length === 0;
   // The pledge is for what was typed and the contract takes no more than the gap; the approval is for what it takes.
   const calls = canSend ? pledgeCalls({ boomerang: o.where.boomerang, usdc: o.where.usdc, id: o.campaign.id, amount, allowance: o.allowance ?? 0n, taken }) : [];
-  const button = o.account === null ? (hasWallet ? "Connect a wallet" : "No wallet in this browser") : quote.kind === "refused" ? "Pledge" : `Pledge ${formatUsd(taken)} USDC`;
+  const button = o.account === null ? (hasWallet ? "Connect a wallet" : practice ? PRACTICE.button : "No wallet in this browser") : quote.kind === "refused" ? "Pledge" : `Pledge ${formatUsd(taken)} USDC`;
   return { amount, quote, line: quote.line, source: quote.kind === "refused" ? "none" : o.answer === null ? "estimate" : "contract", blocks, canSend, button, calls };
 }
 

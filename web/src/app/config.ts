@@ -18,12 +18,14 @@ export type Config = {
   signedPledge: Address | null;
   /** The keeper's base URL, without a trailing slash; null when none is set (the feed is then unavailable). */
   keeperUrl: string | null;
+  /** The block the contract was created in, where its events start; 0 on a local chain, or when the deployment did not record it. */
+  deployBlock: bigint;
 };
 
 export class ConfigError extends Error {}
 
 type Env = Readonly<Record<string, string | undefined>>;
-type Deployed = (chainId: number) => { boomerang: Address; router: Address; usdc: Address; desk?: Address | null; signedPledge?: Address | null };
+type Deployed = (chainId: number) => { boomerang: Address; router: Address; usdc: Address; desk?: Address | null; signedPledge?: Address | null; deployBlock?: bigint | null };
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -77,6 +79,7 @@ export function configFrom(env: Env, deployed: Deployed = addressesFor): Config 
       desk: at.desk ?? null,
       signedPledge: at.signedPledge ?? null,
       keeperUrl: url(env, "VITE_KEEPER_URL", { localOnly: false }),
+      deployBlock: at.deployBlock ?? 0n,
     };
   }
 
@@ -90,5 +93,6 @@ export function configFrom(env: Env, deployed: Deployed = addressesFor): Config 
     desk: env.VITE_DESK_ADDRESS === undefined || env.VITE_DESK_ADDRESS === "" ? null : address(env, "VITE_DESK_ADDRESS"),
     signedPledge: env.VITE_SIGNED_PLEDGE === undefined || env.VITE_SIGNED_PLEDGE === "" ? null : address(env, "VITE_SIGNED_PLEDGE"),
     keeperUrl: url(env, "VITE_KEEPER_URL", { localOnly: true }),
+    deployBlock: 0n,
   };
 }

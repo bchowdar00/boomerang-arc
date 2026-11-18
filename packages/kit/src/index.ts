@@ -11,3 +11,4 @@ export * from "./ledger.ts";
 export * from "./reads.ts";
 export * from "./cctp.ts";
 export * from "./signed.ts";
+export * from "./fingerprint.ts";

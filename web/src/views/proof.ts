@@ -5,13 +5,17 @@
 // And the Stream's own pulse. Only the first is the truth about the money; the other two are
 // there to be compared with it, and the page says plainly when they are late, absent or wrong.
 import type { Address } from "../../../packages/kit/src/index.ts";
+import { Outcome } from "../../../packages/kit/src/index.ts";
+import { hrefFor } from "../app/route.ts";
 import type { BackerCheck } from "../app/world.ts";
+import { phaseOf } from "../data/campaign.ts";
 import type { HealthView } from "../data/health.ts";
 import { backerDifferences, differences, short, standing, type LedgerView } from "../data/keeper.ts";
+import { nameOf, type Label } from "../data/labels.ts";
 import type { CampaignView, Custody } from "../data/load.ts";
 import { formatUsd } from "../data/money.ts";
 import { utcStamp } from "../data/time.ts";
-import type { Row } from "./campaign.ts";
+import { duesOf, type Row } from "./campaign.ts";
 import { SOURCE } from "./shell.ts";
 
 export type ProofPage = {
@@ -29,16 +33,48 @@ export type ProofPage = {
   facts: Row[];
   /** How to check all of this without trusting this page. */
   yourself: { line: string; commands: string[] };
+  /** Every campaign the page read, newest first, and how each one ended. */
+  campaigns: {
+    title: string;
+    head: readonly [string, string, string, string];
+    rows: { href: string; name: string; ended: string; pledged: string; paid: string }[];
+    /** Set when fewer campaigns were read than the contract has; else null. */
+    note: string | null;
+  };
   limits: string[];
 };
+
+// The outcome word, the one the landing page's ledger uses for a settled campaign, or "Open" /
+// "Waiting to be settled" while the campaign has no outcome yet.
+function endedWord(c: CampaignView, now: bigint): string {
+  switch (c.state.outcome) {
+    case Outcome.Funded:
+      return "Cleared";
+    case Outcome.Missed:
+      return "Returned";
+    case Outcome.Void:
+      return "Never opened";
+    default:
+      return phaseOf(c.terms, c.state, now) === "ended" ? "Waiting to be settled" : "Open";
+  }
+}
+
+// What has been paid out, in the table's words. `duesOf` covers the recipient and the two pots
+// only; it does not know each backer's refund, so a missed campaign never reads "in full" here.
+function paidWord(c: CampaignView): string {
+  if (c.state.outcome === Outcome.Open) return "Not yet";
+  if (duesOf(c).length > 0) return "Not all yet";
+  return c.state.outcome === Outcome.Missed ? "Pots returned; refunds are on its page" : "In full";
+}
 
 export const LIMITS: readonly string[] = [
   "This runs on Arc Testnet with test USDC. No real money is involved and no real campaign has run on it.",
   "The names and descriptions of campaigns are this site's words. The contract holds only amounts, dates and addresses.",
-  "The keeper and the Stream make payouts prompt; they are not needed for them. With both off nothing is lost, only later: from this site anyone can settle a campaign, pay its recipient and return the pots that were not paid out, and a backer can send their own refund from the campaign's page or from My money. Someone else's refund can be sent by anyone, but only by calling the contract with that backer's address.",
+  "The keeper and the Stream make payouts prompt; they are not needed for them. With both off nothing is lost, only later: from this site anyone can settle a campaign, pay its recipient and return the pots that were not paid out, and a backer can send their own refund from the campaign's page or from My money. Anyone can send someone else's refund as well: look the backer's address up under My money.",
   "This site opens campaigns only through its desk, on fixed ten-minute terms. A sponsor with other terms calls the contract directly. The router for pledges from other chains is deployed, but this site has no form for such a pledge yet.",
   "A pledge from another chain is refunded on Arc, to the backer's address there, not back across the bridge.",
   "A one-signature pledge is sent by the keeper, which pays its gas. The signature can move the backer's USDC only into the campaign and amount it names, once, within three minutes. When the keeper is down or refuses, the page offers the two-step pledge, which needs no keeper.",
+  "A practice wallet is a key this page makes so that a visitor without a wallet can try a pledge. It is kept in this browser's storage, or only for the visit where the browser does not allow that. It is for test money only: anyone who can use this browser can use it, and clearing the browser's data loses it.",
   "The second ledger is only as good as the events delivered to the keeper. When it disagrees with the contract, the contract is right.",
   "Nothing here shows how people behave when a refund bonus is on offer. That has not been measured on this app.",
 ];
@@ -63,7 +99,14 @@ export function proofPage(o: {
   /** How many backer records the ledger lists in all. */
   backerTotal: number;
   where: { boomerang: Address; usdc: Address; router: Address };
+  /** The site's labels, the desk address and the read block's time, as `ledgerView` takes them, for the campaigns table. */
+  labels?: readonly Label[];
+  desk?: Address | null;
+  now?: bigint;
 }): ProofPage {
+  const labels = o.labels ?? [];
+  const desk = o.desk ?? null;
+  const now = o.now ?? 0n;
   const c = o.custody;
   const custody: ProofPage["custody"] =
     c === null
@@ -173,6 +216,18 @@ export function proofPage(o: {
     yourself: {
       line: "You do not have to trust this page. With git and Node 26, these commands download the code, build the contracts and re-check the live contract without any key: its code, how it was created, that it has no owner, that it holds what it owes, and that a ledger rebuilt from its events matches the state the contract reports for every campaign and every backer.",
       commands: [`git clone ${SOURCE}`, "cd boomerang-arc", "npm ci", "npm run verify"],
+    },
+    campaigns: {
+      title: "Every campaign, and how it ended",
+      head: ["Campaign", "Ended", "Pledged", "Paid"],
+      rows: o.campaigns.map((campaign) => ({
+        href: hrefFor({ page: "campaign", id: campaign.id }),
+        name: nameOf(labels, campaign, desk).title,
+        ended: endedWord(campaign, now),
+        pledged: `${formatUsd(campaign.state.pledged)} of ${formatUsd(campaign.terms.target)}`,
+        paid: paidWord(campaign),
+      })),
+      note: BigInt(o.campaigns.length) < o.count ? `The newest ${o.campaigns.length} of ${o.count} campaigns.` : null,
     },
     limits: [...LIMITS],
   };

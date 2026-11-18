@@ -4,6 +4,7 @@
 import type { Address } from "../../../packages/kit/src/index.ts";
 import { hrefFor, type Route } from "../app/route.ts";
 import { short } from "../data/keeper.ts";
+import { PRACTICE, practiceAccount } from "./practice.ts";
 
 export type Shell = {
   brand: string;
@@ -14,7 +15,8 @@ export type Shell = {
   /** The links in the foot: the code, the contract on the explorer when there is one, and Proof. */
   foot: { href: string; label: string; external: boolean }[];
   wallet: {
-    state: "none" | "connect" | "wrong-network" | "ready";
+    /** "practice": nobody connected, no wallet in the browser, a practice wallet on offer. "own": the practice wallet is in use and the browser has a wallet of the visitor's own to go back to. */
+    state: "none" | "connect" | "practice" | "wrong-network" | "ready" | "own";
     /** The account, shortened; null until one is connected. */
     account: string | null;
     button: string | null;
@@ -44,6 +46,9 @@ export function shell(o: {
   wallets: number;
   account: Address | null;
   walletChainId: number | null;
+  /** Whether a practice wallet is on offer, and whether the connected account is one. */
+  practice?: boolean;
+  practising?: boolean;
   /** The block of the last good read, or null if there has been none; whether the latest attempt failed. */
   block: bigint | null;
   readFailed: boolean;
@@ -51,8 +56,14 @@ export function shell(o: {
   const wallet: Shell["wallet"] =
     o.account === null
       ? o.wallets === 0
-        ? { state: "none", account: null, button: null, note: "No wallet found in this browser. You can read everything here without one; to pledge you need a wallet with USDC on Arc Testnet." }
+        ? o.practice
+          ? { state: "practice", account: null, button: "Try a practice wallet", note: null }
+          : { state: "none", account: null, button: null, note: "No wallet found in this browser. You can read everything here without one; to pledge you need a wallet with USDC on Arc Testnet." }
         : { state: "connect", account: null, button: "Connect a wallet", note: null }
+      : o.practising
+        ? o.wallets > 0
+          ? { state: "own", account: practiceAccount(o.account), button: PRACTICE.own, note: null }
+          : { state: "ready", account: practiceAccount(o.account), button: null, note: null }
       : o.walletChainId !== null && o.walletChainId !== o.chain.id
         ? { state: "wrong-network", account: short(o.account), button: `Switch to ${o.chain.name}`, note: `Your wallet is on another network. Nothing is sent until it is on ${o.chain.name}.` }
         : { state: "ready", account: short(o.account), button: null, note: null };
@@ -91,11 +102,11 @@ export function deskOffer(o: { desk: Address | null; account: Address | null }):
   return { button: "Get 2.00 USDC", note: "From this site's desk, once per address. Circle's faucet for Arc Testnet gives more." };
 }
 
-/** One step of a send, as the visitor reads it while their wallet is asking or the chain is working. */
-export function stepLine(step: { index: number; label: string; state: "asking" | "sent" | "done" }, total: number): string {
+/** One step of a send, as the visitor reads it while their wallet is asking or the chain is working. With the practice wallet there is nothing to confirm: it sends at once. */
+export function stepLine(step: { index: number; label: string; state: "asking" | "sent" | "done" }, total: number, practising: boolean = false): string {
   const n = total > 1 ? `Step ${step.index + 1} of ${total}: ` : "";
   const what = step.label;
-  return step.state === "asking" ? `${n}${what}. Confirm it in your wallet.` : step.state === "sent" ? `${n}${what}. Sent; waiting for the chain.` : `${n}${what}. Done.`;
+  return step.state === "asking" ? `${n}${what}. ${practising ? "The practice wallet is sending it." : "Confirm it in your wallet."}` : step.state === "sent" ? `${n}${what}. Sent; waiting for the chain.` : `${n}${what}. Done.`;
 }
 
 /** The fixed words on the pages: headings, labels and short notes that depend on nothing. */

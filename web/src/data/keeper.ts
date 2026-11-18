@@ -142,6 +142,37 @@ export function backerOf(b: LedgerBackerView): Backer {
   return { principal: b.principal, weighted: b.weighted, payTo: b.payTo ?? "0x0000000000000000000000000000000000000000", paid: b.paid };
 }
 
+/**
+ * The backer shown as an example when nobody is connected: the address in the most campaigns of
+ * the keeper's ledger; between equals the one in the newest campaign, then the lowest address.
+ * Only the address is taken from the ledger; its figures are then read from the contract.
+ */
+export function exampleBacker(ledger: LedgerView): Address | null {
+  const seen = new Map<string, { address: Address; campaigns: number; newest: bigint }>();
+  for (const c of ledger.campaigns) {
+    for (const b of c.backers) {
+      const key = b.address.toLowerCase();
+      const had = seen.get(key);
+      if (had === undefined) seen.set(key, { address: b.address, campaigns: 1, newest: c.id });
+      else {
+        had.campaigns += 1;
+        if (c.id > had.newest) had.newest = c.id;
+      }
+    }
+  }
+  let best: { address: Address; campaigns: number; newest: bigint } | null = null;
+  for (const one of seen.values()) {
+    if (
+      best === null ||
+      one.campaigns > best.campaigns ||
+      (one.campaigns === best.campaigns && (one.newest > best.newest || (one.newest === best.newest && one.address.toLowerCase() < best.address.toLowerCase())))
+    ) {
+      best = one;
+    }
+  }
+  return best === null ? null : best.address;
+}
+
 /** "0x12ab…cd34" */
 export function short(address: string): string {
   return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;

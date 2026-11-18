@@ -131,9 +131,11 @@ export type Standing =
  * Every figure here is the contract's own: the backer's `principal`, and the bonus worked out
  * from `bonusPaid`, the backer's weight and the campaign's total weight. Nothing is taken from the
  * keeper or its ledger. `redirectTo`, when set, is the address this account pointed its refund at
- * (not the account itself): the refund goes there, and the lines say so.
+ * (not the account itself): the refund goes there, and the lines say so. With `third` the sentences
+ * are about someone else's pledge ("this backer"), for a page that shows another account's money.
  */
-export function standingOf(t: Terms, s: State, b: Backer, redirectTo?: Address | null): Standing {
+export function standingOf(t: Terms, s: State, b: Backer, redirectTo?: Address | null, third: boolean = false): Standing {
+  const chose = third ? "the address this backer chose" : "the address you chose";
   if (b.principal === 0n) return { kind: "none", line: "" };
   if (s.outcome === Outcome.Funded) {
     return { kind: "given", principal: b.principal, line: `${formatUsd(b.principal)} went to the campaign. It was funded.` };
@@ -143,7 +145,7 @@ export function standingOf(t: Terms, s: State, b: Backer, redirectTo?: Address |
       const bonus = share(s.bonusPaid, b.weighted, s.weighted);
       const principal = b.principal;
       const line = redirectTo
-        ? `${formatUsd(principal + bonus)} was paid to ${short(redirectTo)}, the address you chose.`
+        ? `${formatUsd(principal + bonus)} was paid to ${short(redirectTo)}, ${chose}.`
         : bonus > 0n
           ? `${formatUsd(principal)} came back, plus ${formatUsd(bonus)} bonus.`
           : `${formatUsd(principal)} came back.`;
@@ -151,10 +153,10 @@ export function standingOf(t: Terms, s: State, b: Backer, redirectTo?: Address |
     }
     const owed = owedTo(t, s, b);
     const line = redirectTo
-      ? `${formatUsd(owed.principal + owed.bonus)} is owed and will go to ${short(redirectTo)}, the address you chose.`
+      ? `${formatUsd(owed.principal + owed.bonus)} is owed and will go to ${short(redirectTo)}, ${chose}.`
       : owed.bonus > 0n
-        ? `${formatUsd(owed.principal)} plus ${formatUsd(owed.bonus)} bonus is yours. Anyone can send it; you can too.`
-        : `${formatUsd(owed.principal)} is yours. Anyone can send it; you can too.`;
+        ? `${formatUsd(owed.principal)} plus ${formatUsd(owed.bonus)} bonus is ${third ? "owed to this backer. Anyone can send it." : "yours. Anyone can send it; you can too."}`
+        : `${formatUsd(owed.principal)} is ${third ? "owed to this backer. Anyone can send it." : "yours. Anyone can send it; you can too."}`;
     return { kind: "owed", principal: owed.principal, bonus: owed.bonus, line };
   }
   // Open (a void campaign never took a pledge)
