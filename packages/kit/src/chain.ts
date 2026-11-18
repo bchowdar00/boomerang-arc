@@ -12,6 +12,11 @@ export const arcTestnet = defineChain({
   blockExplorers: {
     default: { name: "Arc Explorer", url: "https://explorer.testnet.arc.io" },
   },
+  // Multicall3 at its usual address (code read there 2026-11-18). A client that asks for multicall
+  // batching folds simultaneous reads into one call through it; other clients are unaffected.
+  contracts: {
+    multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" },
+  },
   testnet: true,
 });
 

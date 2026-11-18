@@ -2,7 +2,7 @@
 // the state of whatever is being sent, and hands the pages a context. It writes no words of its
 // own: every sentence on screen comes from a view, an error explainer or the desk's answers.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPublicClient, createWalletClient, custom, http, type Abi, type PublicClient } from "viem";
+import { createWalletClient, custom, type Abi, type PublicClient } from "viem";
 
 import { authorizationStateAbi, boomerangAbi, type Address } from "../../../packages/kit/src/index.ts";
 import { askForCampaign, askForUsdc, askKeeper, askRelay, type Fetch } from "../data/ask.ts";
@@ -22,7 +22,7 @@ import { explorerLink } from "../views/links.ts";
 import { fallbackLine, relayLine, relayRefusedBeforeSending } from "../views/pledge.ts";
 import { shell, stepLine, WORDS } from "../views/shell.ts";
 import { connect as askWallet, connected, declined, discover, ensureChain, type FoundWallet } from "../wallet/injected.ts";
-import { chainOf } from "./chain.ts";
+import { chainOf, clientFor } from "./chain.ts";
 import type { Config } from "./config.ts";
 import type { Ctx, RelayOutcome, SendState, SignedGuard } from "./context.ts";
 import { startPoll, type Poll, type PollHost } from "./poll.ts";
@@ -59,7 +59,7 @@ const chainNumber = (v: unknown): number | null => {
 
 export function App({ config, labels, extraWallet }: { config: Config; labels: readonly Label[]; extraWallet: FoundWallet | null }) {
   const chain = useMemo(() => chainOf(config), [config]);
-  const client = useMemo(() => createPublicClient({ chain, transport: http(config.chain.rpcUrl) }) as PublicClient, [chain, config]);
+  const client = useMemo(() => clientFor(config), [config]);
 
   // Where the visitor is.
   const [route, setRoute] = useState<Route>(() => routeOf(window.location.hash));
