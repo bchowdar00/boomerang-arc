@@ -18,7 +18,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { Outcome, setup, USD } from "./helpers.ts";
 import { boomerangAbi, decodeLogs, emptyLedger, share, type Address, type RawLog } from "../../packages/kit/src/index.ts";
 import { makeSender } from "../../services/keeper/src/chain.ts";
-import { createDesk, DEMO } from "../../services/keeper/src/demo.ts";
+import { createDesk, DEMO, DESK_KINDS } from "../../services/keeper/src/demo.ts";
 import { createKeeper, type Delivery, type Keeper, type Sender, type SendResult } from "../../services/keeper/src/keeper.ts";
 import type { Action } from "../../services/keeper/src/plan.ts";
 import { createServer } from "../../services/keeper/src/server.ts";
@@ -1933,6 +1933,91 @@ describe("keeper against the contract", async function () {
       assert.ok(again.ok, `${JSON.stringify(note)} -> ${JSON.stringify(again)}`);
       await w.time.increaseTo((await w.boomerang.read.termsOf([BigInt(again.ok ? again.id! : "0")])).closesAt);
     }
+  });
+
+  it("desk.two: a two-minute campaign has the same pots on shorter times, is funded before it opens, pays a lone early backer back with a bonus, and shares the one-at-a-time rule", async function () {
+    const w = await setup();
+    await w.usdc.write.mint([w.erin.account.address, 1_000_000_000n]);
+    const store = memoryStore();
+    const keeper = createKeeper({
+      boomerang: w.boomerang.address,
+      store,
+      send: makeSender({ publicClient: w.publicClient, walletClient: w.stranger, boomerang: w.boomerang.address }),
+    });
+    const desk = createDesk({
+      publicClient: w.publicClient,
+      walletClient: w.erin,
+      boomerang: w.boomerang.address,
+      usdc: w.usdc.address,
+      recipient: w.recipient.account.address,
+      store,
+      ledger: () => keeper.ledger,
+    });
+
+    // The two kinds, as fixed numbers: the ten-minute one is unchanged.
+    assert.deepEqual(DESK_KINDS, { ten: { opensIn: 60n, earlyFor: 360n, openFor: 600n }, two: { opensIn: 45n, earlyFor: 72n, openFor: 120n } });
+    assert.deepEqual([DEMO.opensIn, DEMO.earlyFor, DEMO.openFor], [60n, 360n, 600n]);
+
+    const before = BigInt(await w.time.latest());
+    const r = await desk.openCampaign("two");
+    assert.ok(r.ok && r.id, JSON.stringify(r));
+    const id = BigInt(r.id!);
+
+    const t = await w.boomerang.read.termsOf([id]);
+    assert.deepEqual([t.opensAt - before, t.earlyUntil - t.opensAt, t.closesAt - t.opensAt], [45n, 72n, 120n]);
+    assert.deepEqual([t.target, t.minPledge, t.matchAmount, t.bonusPool, t.rateBps], [DEMO.target, DEMO.minPledge, DEMO.match, DEMO.pool, DEMO.rateBps]);
+    assert.deepEqual([t.linearWeight, t.bonusFromRecipient], [true, false]);
+    const s = await w.boomerang.read.stateOf([id]);
+    assert.ok(s.matchIn && s.bonusIn, "both pots are in");
+    assert.ok(BigInt(await w.time.latest()) < t.opensAt, "it is not open yet");
+
+    // One desk campaign at a time, whatever its kind: before the keeper has heard, and after.
+    assert.deepEqual(await desk.openCampaign("ten"), { ok: false, reason: "campaign-open" });
+    // A desk started again over the same store believes the note it finds, though the note is
+    // for the short kind and the ledger it is handed has heard of nothing.
+    const restarted = createDesk({
+      publicClient: w.publicClient,
+      walletClient: w.erin,
+      boomerang: w.boomerang.address,
+      usdc: w.usdc.address,
+      recipient: w.recipient.account.address,
+      store,
+      ledger: () => emptyLedger(),
+    });
+    assert.deepEqual(await restarted.openCampaign("two"), { ok: false, reason: "campaign-open" });
+    assert.deepEqual(await restarted.openCampaign("ten"), { ok: false, reason: "campaign-open" });
+    assert.deepEqual(await desk.openCampaign("two"), { ok: false, reason: "campaign-open" });
+    for (const d of await blockDeliveries(w)) keeper.deliver(d);
+    assert.deepEqual(await desk.openCampaign(), { ok: false, reason: "campaign-open" });
+    assert.deepEqual(await desk.openCampaign("two"), { ok: false, reason: "campaign-open" });
+    assert.equal(await w.boomerang.read.campaignCount(), 1n);
+
+    // A lone early backer cannot meet the target: at the deadline the keeper settles it as
+    // missed, and the pledge comes back with a bonus from the pool.
+    const pledge = 500_000n;
+    await w.pledge(id, w.alice, pledge, t.opensAt + 5n); // the helper mints exactly this much to the backer first
+    assert.equal(await w.usdc.read.balanceOf([w.alice.account.address]), 0n);
+    await w.time.increaseTo(t.closesAt);
+    await pump(w, keeper, 4);
+    assert.equal((await w.boomerang.read.stateOf([id])).outcome, Outcome.Missed);
+    const back = await w.usdc.read.balanceOf([w.alice.account.address]);
+    assert.ok(back > pledge && back <= pledge + DEMO.pool, `back ${back}`);
+
+    // Once it is settled, either kind may open; the default is still the ten-minute one.
+    const r2 = await desk.openCampaign();
+    assert.ok(r2.ok && r2.id, JSON.stringify(r2));
+    const t2 = await w.boomerang.read.termsOf([BigInt(r2.id!)]);
+    assert.deepEqual([t2.earlyUntil - t2.opensAt, t2.closesAt - t2.opensAt], [360n, 600n]);
+    assert.deepEqual(await desk.openCampaign("two"), { ok: false, reason: "campaign-open" });
+
+    // A kind the desk does not know opens nothing.
+    await w.time.increaseTo(t2.closesAt);
+    await pump(w, keeper, 4);
+    for (const kind of ["an hour", "constructor", "__proto__", "toString", ""]) {
+      const odd = await desk.openCampaign(kind as never);
+      assert.deepEqual([odd.ok, odd.ok ? "" : odd.reason], [false, "failed"], kind);
+    }
+    assert.equal(await w.boomerang.read.campaignCount(), 2n);
   });
 
   it("desk.campaign: opens a DEMO campaign, refuses a second while open, allows a new one once settled, and is desk-low when poor", async function () {

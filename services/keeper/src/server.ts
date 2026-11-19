@@ -12,7 +12,7 @@ import { parseDelivery, type Keeper } from "./keeper.ts";
 import { RELAY, type Relay } from "./relay.ts";
 import { bodyText, verifySignature } from "./verify.ts";
 
-const CORS_PATHS = new Set(["/ledger", "/health", "/demo/usdc", "/demo/campaign", "/relay"]);
+const CORS_PATHS = new Set(["/ledger", "/health", "/demo/usdc", "/demo/campaign", "/demo/campaign/two", "/relay"]);
 const TOO_LARGE = Symbol("too-large");
 const TOO_SLOW = Symbol("too-slow");
 const TOO_BUSY = Symbol("too-busy");
@@ -306,10 +306,12 @@ export function createServer(o: {
       return;
     }
 
-    if (method === "POST" && path === "/demo/campaign") {
+    // The desk's two campaigns, each at its own path, so no body is read: the ten-minute one,
+    // and the two-minute one.
+    if (method === "POST" && (path === "/demo/campaign" || path === "/demo/campaign/two")) {
       if (!desk) return reply(503, { ok: false, reason: "no-desk" }, true);
       desk
-        .openCampaign()
+        .openCampaign(path === "/demo/campaign/two" ? "two" : "ten")
         .then((r) => reply(r.ok ? 200 : 409, r, true))
         .catch(() => reply(503, { ok: false, reason: "busy" }, true));
       return;

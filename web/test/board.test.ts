@@ -9,7 +9,7 @@ import type { FeedItem, LedgerView } from "../src/data/keeper.ts";
 import type { CampaignView } from "../src/data/load.ts";
 import { utcStamp } from "../src/data/time.ts";
 import { agoLine, agoOf, boardTime, boardView, settledLine } from "../src/views/board.ts";
-import { chartPaths, chartView, climbOf, valueLabelY } from "../src/views/chart.ts";
+import { axisEnds, chartPaths, chartView, climbOf, valueLabelY } from "../src/views/chart.ts";
 import { changedPositions } from "../src/views/flip.ts";
 import { pledgeForm } from "../src/views/pledge.ts";
 import { receiptView } from "../src/views/receipt.ts";
@@ -329,5 +329,25 @@ describe("chart.valueLabel", () => {
   it("chart.valueLabel.left: away from the right end the total is beside its point and stays above it", () => {
     assert.equal(valueLabelY({ dotRight: true, open: true, nowY: 0, paceLabelY: 40 }), -8);
     assert.equal(valueLabelY({ dotRight: true, open: false, nowY: 50, paceLabelY: 40 }), 42);
+  });
+});
+
+describe("chart.axis", function () {
+  it("a campaign whose two ends fall on one UTC day is marked by the time of day; any other by the day, with the year when the years differ", function () {
+    const at = (iso: string) => BigInt(Date.parse(iso) / 1000);
+    // The desk's two-minute campaign: the same date at both ends would say nothing.
+    assert.deepEqual(axisEnds(at("2026-11-19T01:25:40Z"), at("2026-11-19T01:27:40Z")), { opens: "Opens 01:25 UTC", closes: "Closes 01:27 UTC" });
+    assert.deepEqual(axisEnds(at("2026-11-19T00:00:00Z"), at("2026-11-19T23:59:59Z")), { opens: "Opens 00:00 UTC", closes: "Closes 23:59 UTC" });
+    // Two days: the day tells the ends apart, however short the campaign. Times alone would
+    // read as closing before it opened (10:00 to 09:59 the next day).
+    assert.deepEqual(axisEnds(at("2026-11-19T23:59:00Z"), at("2026-11-20T00:01:00Z")), { opens: "Opens 19 Nov", closes: "Closes 20 Nov" });
+    assert.deepEqual(axisEnds(at("2026-11-19T10:00:00Z"), at("2026-11-20T09:59:59Z")), { opens: "Opens 19 Nov", closes: "Closes 20 Nov" });
+    assert.deepEqual(axisEnds(at("2026-11-06T21:20:00Z"), at("2026-11-13T21:20:00Z")), { opens: "Opens 6 Nov", closes: "Closes 13 Nov" });
+    // Across a year end the year is said, so the same day of the month cannot read as one day.
+    assert.deepEqual(axisEnds(at("2026-11-19T10:00:00Z"), at("2027-11-19T10:00:00Z")), { opens: "Opens 19 Nov 2026", closes: "Closes 19 Nov 2027" });
+    assert.deepEqual(axisEnds(at("2026-12-31T23:59:00Z"), at("2027-01-01T00:01:00Z")), { opens: "Opens 31 Dec 2026", closes: "Closes 1 Jan 2027" });
+    // A date the page cannot read is said as that, at either end.
+    assert.deepEqual(axisEnds(at("2026-11-19T10:00:00Z"), 999_999_999_999_999n), { opens: "Opens 19 Nov 2026", closes: "Closes an unreadable date" });
+    assert.deepEqual(axisEnds(999_999_999_999_999n, 999_999_999_999_999n), { opens: "Opens an unreadable date", closes: "Closes an unreadable date" });
   });
 });

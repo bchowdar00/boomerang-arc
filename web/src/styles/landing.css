@@ -98,6 +98,8 @@
 .landing .closing { text-align: center; padding-block: clamp(96px, 14vw, 180px); }
 .landing .closing h2 { margin-inline: auto; }
 .landing .closing .sub { margin: 0 auto 30px; }
+.landing .closing .other { margin: 8px auto 0; font-size: 0.92rem; }
+.landing .closing .other .btn-plain { padding-block: 6px; }
 .landing .closing .problem { margin: 16px auto 0; }
 
 @media (max-width: 900px) {

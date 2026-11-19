@@ -59,7 +59,7 @@ const fakeDesk: Desk = {
     if (to === "0xdup") return { ok: false, reason: "already-given" };
     return { ok: true, hash: "0xfeed" };
   },
-  openCampaign: async (): Promise<DeskResult> => ({ ok: true, id: "7" }),
+  openCampaign: async (kind = "ten"): Promise<DeskResult> => ({ ok: true, id: kind === "two" ? "8" : "7" }),
 };
 
 const fakeRelay: Relay = {
@@ -286,6 +286,9 @@ describe("keeper server", function () {
       assert.deepEqual(await r1.json(), { ok: false, reason: "no-desk" });
       const r2 = await fetch(url + "/demo/campaign", { method: "POST" });
       assert.equal(r2.status, 503);
+      const r3 = await fetch(url + "/demo/campaign/two", { method: "POST" });
+      assert.equal(r3.status, 503);
+      assert.deepEqual(await r3.json(), { ok: false, reason: "no-desk" });
     });
   });
 
@@ -303,6 +306,39 @@ describe("keeper server", function () {
       const camp = await fetch(url + "/demo/campaign", { method: "POST" });
       assert.equal(camp.status, 200);
       assert.deepEqual(await camp.json(), { ok: true, id: "7" });
+    });
+  });
+
+  it("server.deskTwo: POST /demo/campaign/two asks the desk for the two-minute kind; the old path still asks for the ten-minute one", async function () {
+    const { keeper } = fakeKeeper();
+    const asked: unknown[] = [];
+    const desk: Desk = {
+      ...fakeDesk,
+      openCampaign: async (kind) => {
+        asked.push(kind);
+        return kind === "two" ? { ok: true, id: "8" } : { ok: false, reason: "campaign-open" };
+      },
+    };
+    await withServer({ keeper, desk }, async (url) => {
+      const two = await fetch(url + "/demo/campaign/two", { method: "POST" });
+      assert.equal(two.status, 200);
+      assert.equal(two.headers.get("access-control-allow-origin"), "*");
+      assert.deepEqual(await two.json(), { ok: true, id: "8" });
+      const ten = await fetch(url + "/demo/campaign", { method: "POST" });
+      assert.equal(ten.status, 409);
+      assert.deepEqual(await ten.json(), { ok: false, reason: "campaign-open" });
+      assert.deepEqual(asked, ["two", "ten"]);
+      // The browser's question before the POST is answered, and nothing else under the path exists.
+      const opt = await fetch(url + "/demo/campaign/two", { method: "OPTIONS" });
+      assert.equal(opt.status, 204);
+      assert.equal(opt.headers.get("access-control-allow-origin"), "*");
+      assert.equal((await fetch(url + "/demo/campaign/two", { method: "GET" })).status, 404);
+      assert.equal((await fetch(url + "/demo/campaign/three", { method: "POST" })).status, 404);
+      assert.equal((await fetch(url + "/demo/campaign/two/", { method: "POST" })).status, 404);
+      // Nothing the asker sends chooses the kind or its times: a query and a body are not read.
+      const loud = await fetch(url + "/demo/campaign/two?kind=ten&openFor=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "ten", openFor: 1 }) });
+      assert.deepEqual([loud.status, await loud.json()], [200, { ok: true, id: "8" }]);
+      assert.deepEqual(asked, ["two", "ten", "two"]);
     });
   });
 
@@ -534,6 +570,7 @@ describe("keeper server", function () {
         [`GET /health HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\n\r\n`, 200],
         [`GET /nothing HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n`, 404],
         [`POST /demo/campaign HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\n\r\n`, 200],
+        [`POST /demo/campaign/two HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\n\r\n`, 200],
         [`OPTIONS /ledger HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\n\r\n`, 204],
       ] as const) {
         const started = Date.now();

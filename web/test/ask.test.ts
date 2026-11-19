@@ -79,12 +79,24 @@ describe("asking the keeper", function () {
     assert.equal(f.seen[0].url, `${URL_}/demo/usdc`);
     assert.deepEqual([f.seen[0].init.method, f.seen[0].init.body, f.seen[0].init.credentials, f.seen[0].init.redirect], ["POST", JSON.stringify({ address: ME }), "omit", "error"]);
 
-    const campaign = async (body: unknown) => askForCampaign({ url: URL_, fetch: fake({ "/demo/campaign": { body } }).fetch });
+    const PATHS = { ten: "/demo/campaign", two: "/demo/campaign/two" } as const;
+    const campaign = async (body: unknown, kind: "ten" | "two" = "ten") => askForCampaign({ url: URL_, fetch: fake({ [PATHS[kind]]: { body } }).fetch, kind });
     assert.deepEqual(await campaign({ ok: true, id: "7" }), { ok: true, line: "A ten-minute campaign is open. It takes pledges in about a minute and settles in about eleven.", id: 7n });
+    assert.deepEqual(await campaign({ ok: true, id: "8" }, "two"), { ok: true, line: "A two-minute campaign is open. It takes pledges in under a minute and settles in about three and a half minutes.", id: 8n });
     assert.equal((await campaign({ ok: true, id: "7; drop" })).id, null);
     assert.equal((await campaign({ ok: true })).id, null);
-    const open = await campaign({ ok: false, reason: "campaign-open" });
-    assert.deepEqual([open.ok, open.id], [false, null]);
-    assert.match(open.line, /already running/);
+    // One desk campaign runs at a time, whatever its kind, so the refusal names neither.
+    for (const kind of ["ten", "two"] as const) {
+      const open = await campaign({ ok: false, reason: "campaign-open" }, kind);
+      assert.deepEqual(open, { ok: false, line: "A campaign from the desk is already running. It is on the list; a new one can open when it ends.", id: null }, kind);
+    }
+    // Each kind is asked for at its own path, with an empty body.
+    for (const kind of ["ten", "two"] as const) {
+      const g = fake({ [PATHS[kind]]: { body: { ok: true, id: "1" } } });
+      await askForCampaign({ url: URL_, fetch: g.fetch, kind });
+      assert.deepEqual([g.seen.length, g.seen[0].url, g.seen[0].init.method, g.seen[0].init.body], [1, `${URL_}${PATHS[kind]}`, "POST", "{}"], kind);
+    }
+    // A keeper that does not know the two-minute path (an older one) is a desk that could not be reached: nothing is opened.
+    assert.deepEqual(await askForCampaign({ url: URL_, fetch: fake({ "/demo/campaign": { body: { ok: true, id: "7" } } }).fetch, kind: "two" }), { ok: false, line: "The desk could not be reached.", id: null });
   });
 });

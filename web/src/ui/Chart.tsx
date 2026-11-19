@@ -6,12 +6,10 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { LedgerView } from "../data/keeper.ts";
 import type { CampaignView } from "../data/load.ts";
 import { formatUsd } from "../data/money.ts";
-import { utcStamp } from "../data/time.ts";
-import { chartPaths, chartView, TARGET_LABEL_Y, valueLabelY } from "../views/chart.ts";
+import { axisEnds, chartPaths, chartView, TARGET_LABEL_Y, valueLabelY } from "../views/chart.ts";
 
 const TOP = 26;
 const BOTTOM = 26;
-const dayMonth = (t: bigint) => utcStamp(t).split(" ").slice(0, 2).join(" ");
 const reduced = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
 export function Chart({ campaign, ledger, now, raised, backers, live }: { campaign: CampaignView; ledger: LedgerView | null; now: bigint; raised: string; backers: string; live: boolean }) {
@@ -66,6 +64,7 @@ export function Chart({ campaign, ledger, now, raised, backers, live }: { campai
   const dotRight = p.nowX < box.w - 90;
   const paceLabelY = Math.min(box.h - 6, (box.h * 88) / box.w + 16);
   const valueY = valueLabelY({ dotRight, open: now < v.closes, nowY: p.nowY, paceLabelY });
+  const ends = axisEnds(v.opens, v.closes);
 
   return (
     <figure className={`chart${live ? " live-total" : ""}`} style={{ margin: 0 }}>
@@ -107,10 +106,10 @@ export function Chart({ campaign, ledger, now, raised, backers, live }: { campai
               {formatUsd(v.total)}
             </text>
             <text className="c-tick" x={0} y={box.h + 18}>
-              Opens {dayMonth(v.opens)}
+              {ends.opens}
             </text>
             <text className="c-tick" x={box.w} y={box.h + 18} textAnchor="end">
-              Closes {dayMonth(v.closes)}
+              {ends.closes}
             </text>
           </svg>
         ) : null}

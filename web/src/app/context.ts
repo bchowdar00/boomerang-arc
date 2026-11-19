@@ -1,6 +1,6 @@
 // What every page is handed: the latest read, the configuration, and the few things a page can do.
 import type { Address } from "../../../packages/kit/src/index.ts";
-import type { DeskAnswer } from "../data/ask.ts";
+import type { DeskAnswer, DeskKind } from "../data/ask.ts";
 import type { Label } from "../data/labels.ts";
 import type { Call } from "../flows/calls.ts";
 import type { Answer } from "../views/pledge.ts";
@@ -58,6 +58,6 @@ export type Ctx = {
   /** Ask the contract what a pledge of `amount` to campaign `id` would do, now. */
   quote(id: bigint, amount: bigint): Promise<Answer>;
   askForUsdc(): Promise<DeskAnswer>;
-  askForCampaign(): Promise<DeskAnswer & { id: bigint | null }>;
+  askForCampaign(kind: DeskKind): Promise<DeskAnswer & { id: bigint | null }>;
   refresh(): void;
 };

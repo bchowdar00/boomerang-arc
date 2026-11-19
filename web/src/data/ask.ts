@@ -42,7 +42,7 @@ const REFUSALS: Record<string, string> = {
   "bad-address": "The desk could not use that address.",
   "already-given": "This address has already had its USDC from the desk.",
   "desk-low": "The desk is out of USDC for now. Circle's faucet gives USDC for Arc Testnet.",
-  "campaign-open": "A ten-minute campaign is already running. It is on the list; a new one can open when it ends.",
+  "campaign-open": "A campaign from the desk is already running. It is on the list; a new one can open when it ends.",
   busy: "The desk is busy. Try again in a moment.",
   "no-desk": "This site's keeper is not running a desk.",
   unconfirmed: "The desk sent it, but the chain has not confirmed it yet. Check your balance in a moment; the desk will not send to this address again.",
@@ -88,9 +88,19 @@ export async function askForUsdc(o: { url: string | null; fetch: Fetch; address:
   return said(await post(o, "/demo/usdc", { address: o.address }), "The desk sent 2.00 USDC to your address.");
 }
 
-/** Ask the desk to open a demo campaign; `id` is the new campaign's number when it did. */
-export async function askForCampaign(o: { url: string | null; fetch: Fetch; timeoutMs?: number }): Promise<DeskAnswer & { id: bigint | null }> {
-  const a = await post(o, "/demo/campaign", {});
-  const answer = said(a, "A ten-minute campaign is open. It takes pledges in about a minute and settles in about eleven.");
+/** The two campaigns the desk opens: the same pots on different times. */
+export type DeskKind = "two" | "ten";
+// Each kind has its own path at the keeper and its own sentence. The times in the sentences are
+// the desk's constants (tested against them) plus the half minute the keeper takes to settle.
+const KINDS: Record<DeskKind, { path: string; done: string }> = {
+  two: { path: "/demo/campaign/two", done: "A two-minute campaign is open. It takes pledges in under a minute and settles in about three and a half minutes." },
+  ten: { path: "/demo/campaign", done: "A ten-minute campaign is open. It takes pledges in about a minute and settles in about eleven." },
+};
+
+/** Ask the desk to open a demo campaign of one kind; `id` is the new campaign's number when it did. */
+export async function askForCampaign(o: { url: string | null; fetch: Fetch; timeoutMs?: number; kind: DeskKind }): Promise<DeskAnswer & { id: bigint | null }> {
+  const kind = KINDS[o.kind];
+  const a = await post(o, kind.path, {});
+  const answer = said(a, kind.done);
   return { ...answer, id: a !== null && a.ok && a.id !== null ? BigInt(a.id) : null };
 }

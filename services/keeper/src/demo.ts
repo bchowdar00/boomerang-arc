@@ -4,12 +4,14 @@
 // cannot be emptied, and both leave the campaign's real settlement to the keeper.
 //
 // What the desk can lose is test money, and it is bounded. Each new address takes one slug, until
-// the desk holds less than the floor plus a slug (5 USDC). A visitor who pledges early into a
-// demo campaign that misses collects bonus from its pool, as the rules say: at most the pool
-// (0.30) per campaign, one campaign per eleven minutes, until the desk holds less than the floor
-// plus the two pots (4.30). So everything above about 3 USDC can be given away, and no more. The
-// keeper's own settlement calls are paid from the same account and are not held to the floor:
-// the floor is what is kept for them.
+// the desk holds less than the floor plus a slug (5 USDC). A demo campaign costs the desk at most
+// its two pots, as the rules say: a visitor who pledges early into one that misses collects bonus
+// from its pool (at most 0.30), and one that is funded pays its match (1.00) to the demo
+// recipient. One campaign runs at a time, and the shortest kind is over in under three minutes,
+// so that is how fast the pots can go; it stops when the desk holds less than the floor plus the
+// two pots (4.30). So everything above about 3 USDC can be given away, and no more. The keeper's
+// own settlement calls are paid from the same account and are not held to the floor: the floor
+// is what is kept for them.
 //
 // The floor is checked against the balance the chain has confirmed, so the desk does nothing
 // while any transaction from its account is still unconfirmed: money already on its way out is
@@ -34,10 +36,24 @@ export const DEMO = {
   pool: 300_000n,
   // The design's defaults: pool 10% of the target, rate 20%, early window 60% of the time open, linear weight.
   rateBps: 2000,
+  // The ten-minute campaign's times, in seconds: how long after the request it opens, how long
+  // the early window is, and how long it takes pledges.
   opensIn: 60n,
   earlyFor: 360n,
   openFor: 600n,
 } as const;
+
+// The two campaigns the desk opens. They differ only in their times: the pots, the target and the
+// rate are the same. The two-minute one is for watching the whole thing in one sitting. It opens
+// 45 seconds after the request, because both pots must be locked before a campaign opens or the
+// contract voids it; on Arc that takes about a quarter of a minute.
+export const DESK_KINDS = {
+  ten: { opensIn: DEMO.opensIn, earlyFor: DEMO.earlyFor, openFor: DEMO.openFor },
+  two: { opensIn: 45n, earlyFor: 72n, openFor: 120n },
+} as const;
+export type DeskKind = keyof typeof DESK_KINDS;
+// The furthest closing time the desk can write: the bound on what it believes of its own note.
+const LONGEST = Object.values(DESK_KINDS).reduce((m, k) => (k.opensIn + k.openFor > m ? k.opensIn + k.openFor : m), 0n);
 
 // How many desk requests may wait in line before new ones are turned away.
 const MAX_WAITING = 10;
@@ -49,7 +65,7 @@ export type DeskResult =
 export type Desk = {
   address: Address;
   giveUsdc(to: string): Promise<DeskResult>;
-  openCampaign(): Promise<DeskResult>;
+  openCampaign(kind?: DeskKind): Promise<DeskResult>;
 };
 
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -197,20 +213,22 @@ export function createDesk(o: {
     store.writeNote("demo-last", next === null ? null : { id: next.id === null ? null : next.id.toString(), closesAt: next.closesAt.toString() });
   }
 
-  async function openCampaign(): Promise<DeskResult> {
+  async function openCampaign(kind: DeskKind = "ten"): Promise<DeskResult> {
+    // Only the kinds written above: the times never come from the asker.
+    if (!Object.hasOwn(DESK_KINDS, kind)) return { ok: false, reason: "failed", detail: "no such kind of campaign" };
     if (opening) return { ok: false, reason: "busy" };
     opening = true;
     try {
-      return await inTurn(open);
+      return await inTurn(() => open(DESK_KINDS[kind]));
     } finally {
       opening = false;
     }
   }
 
-  async function open(): Promise<DeskResult> {
+  async function open(times: { opensIn: bigint; earlyFor: bigint; openFor: bigint }): Promise<DeskResult> {
     const now = (await publicClient.getBlock()).timestamp;
     // A closing time further off than any campaign this desk opens is not one it wrote: ignored.
-    if (last !== null && now < last.closesAt && last.closesAt <= now + DEMO.opensIn + DEMO.openFor) {
+    if (last !== null && now < last.closesAt && last.closesAt <= now + LONGEST) {
       const known = last.id === null ? undefined : ledger().campaigns.get(last.id);
       if (known === undefined || known.outcome === Outcome.Open) return { ok: false, reason: "campaign-open" };
     }
@@ -229,12 +247,12 @@ export function createDesk(o: {
       return receipt;
     };
 
-    const opensAt = now + DEMO.opensIn;
+    const opensAt = now + times.opensIn;
     const terms = {
       recipient,
       opensAt,
-      earlyUntil: opensAt + DEMO.earlyFor,
-      closesAt: opensAt + DEMO.openFor,
+      earlyUntil: opensAt + times.earlyFor,
+      closesAt: opensAt + times.openFor,
       target: DEMO.target,
       minPledge: DEMO.minPledge,
       matchAmount: DEMO.match,

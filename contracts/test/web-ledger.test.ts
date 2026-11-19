@@ -16,7 +16,7 @@ import { backerOf, differences, feedLine, readLedger, short, stateOf } from "../
 import { askForCampaign, askForUsdc, type Fetch } from "../../web/src/data/ask.ts";
 import { readHealth } from "../../web/src/data/health.ts";
 import { formatUsd } from "../../web/src/data/money.ts";
-import { DEMO } from "../../services/keeper/src/demo.ts";
+import { DEMO, DESK_KINDS } from "../../services/keeper/src/demo.ts";
 
 type W = Awaited<ReturnType<typeof setup>>;
 
@@ -205,9 +205,13 @@ describe("the app's reader of the keeper's ledger", function () {
     const answer = (body: unknown): Fetch => async () => ({ status: 200, json: async () => body });
     const gave = await askForUsdc({ url: "https://keeper.example", fetch: answer({ ok: true }), address: w.alice.account.address });
     assert.equal(gave.line, `The desk sent ${formatUsd(DEMO.usdc)} USDC to your address.`);
-    const opened = await askForCampaign({ url: "https://keeper.example", fetch: answer({ ok: true, id: "3" }) });
+    const opened = await askForCampaign({ url: "https://keeper.example", fetch: answer({ ok: true, id: "3" }), kind: "ten" });
     assert.equal(DEMO.opensIn, 60n);
     assert.equal(DEMO.opensIn + DEMO.openFor, 660n);
     assert.match(opened.line, /about a minute and settles in about eleven/);
+    const quick = await askForCampaign({ url: "https://keeper.example", fetch: answer({ ok: true, id: "4" }), kind: "two" });
+    assert.ok(DESK_KINDS.two.opensIn < 60n);
+    assert.equal(DESK_KINDS.two.opensIn + DESK_KINDS.two.openFor, 165n); // closes 2:45 after the press; settled about 3:30 after it
+    assert.match(quick.line, /under a minute and settles in about three and a half minutes/);
   });
 });

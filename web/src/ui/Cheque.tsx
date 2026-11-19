@@ -353,7 +353,7 @@ export function Cheque({
 /**
  * The landing page's cheque. It is made out to a campaign that is taking pledges, or about to:
  * the newest by default, any of them by choice. When none is, the cheque is blank and offers a
- * ten-minute campaign from the site's desk, where there is one.
+ * two-minute campaign from the site's desk (or a ten-minute one), where there is one.
  */
 export function HeroCheque({ ctx }: { ctx: Ctx }) {
   const { world, config } = ctx;
@@ -383,7 +383,7 @@ export function HeroCheque({ ctx }: { ctx: Ctx }) {
   }
 
   return (
-    <Sheet head={<span>{WORDS.cheque.noneOpen}</span>} onSubmit={config.desk === null ? undefined : desk.open}>
+    <Sheet head={<span>{WORDS.cheque.noneOpen}</span>} onSubmit={config.desk === null ? undefined : () => desk.open("two")}>
       <p className="cq-row">
         {WORDS.cheque.payTo} <span className="fill payee blank" />
       </p>
@@ -392,12 +392,17 @@ export function HeroCheque({ ctx }: { ctx: Ctx }) {
           <span className="cq-line">{config.desk === null ? WORDS.cheque.noneNote : WORDS.cheque.deskNote}</span>
         </div>
         {config.desk === null ? null : (
-          <button className="btn btn-ink" type="submit" disabled={desk.busy}>
-            {WORDS.cheque.start}
-            <span className="arrow" aria-hidden="true">
-              →
-            </span>
-          </button>
+          <div className="cq-starts">
+            <button className="btn btn-ink" type="submit" disabled={desk.busy}>
+              {WORDS.cheque.start}
+              <span className="arrow" aria-hidden="true">
+                →
+              </span>
+            </button>
+            <button className="btn btn-plain" type="button" onClick={() => desk.open("ten")} disabled={desk.busy}>
+              {WORDS.cheque.startTen}
+            </button>
+          </div>
         )}
       </div>
       {desk.line ? (

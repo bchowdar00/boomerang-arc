@@ -183,6 +183,11 @@ describe("the Campaign page", function () {
     assert.equal(campaignPage({ campaign: campaign(), labels, desk: null, now: OPENS, block: 1n }).name.title, "Send twelve of us to the regional.");
     assert.equal(campaignPage({ campaign: campaign({}, { sponsor: ME }), labels, desk: null, now: OPENS, block: 1n }).name.title, "Campaign 7");
     assert.equal(campaignPage({ campaign: campaign(), labels: [], desk: SPONSOR, now: OPENS, block: 1n }).name.title, "Ten-minute campaign 7");
+    // A desk campaign is named by the time the contract holds it open: the short kind and the long one.
+    const ten = campaignPage({ campaign: campaign({ earlyUntil: OPENS + 360n, closesAt: OPENS + 600n }), labels: [], desk: SPONSOR, now: OPENS, block: 1n }).name;
+    assert.deepEqual([ten.title, ten.about], ["Ten-minute campaign 7", "A small campaign that takes pledges for at most ten minutes and settles within a minute after, so you can watch every step."]);
+    const two = campaignPage({ campaign: campaign({ earlyUntil: OPENS + 72n, closesAt: OPENS + 120n }), labels: [], desk: SPONSOR, now: OPENS, block: 1n }).name;
+    assert.deepEqual([two.title, two.about, two.example], ["Two-minute campaign 7", "A small campaign that takes pledges for at most two minutes and settles within a minute after, so you can watch every step.", true]);
   });
 
   it("view.lost: a number the contract does not have, and an address the app does not know, each get a plain page", function () {
@@ -356,6 +361,7 @@ describe("the Pledge page", function () {
 // The Home and My money pages, appended to the same invented campaign.
 import { minePage } from "../src/views/mine.ts";
 import { homePage } from "../src/views/home.ts";
+import { WORDS } from "../src/views/shell.ts";
 import type { MyPledge } from "../src/data/load.ts";
 
 describe("the Home page", function () {
@@ -388,10 +394,16 @@ describe("the Home page", function () {
     assert.deepEqual(due.running.map((c) => c.status), ["Waiting to be settled"]);
   });
 
-  it("with no campaigns it says so, and offers the ten-minute demo only where a desk exists", function () {
+  it("with no campaigns it says so, and offers the desk's campaigns only where a desk exists: the two-minute one first, the ten-minute one beside it", function () {
     const none = homePage({ campaigns: [], labels: [], desk: SPONSOR, now: OPENS, block: 1n });
     assert.equal(none.empty, "No campaign has been created yet.");
-    assert.equal(none.demo?.button, "Start a ten-minute campaign");
+    assert.deepEqual(none.demo, { button: "Start a two-minute campaign", other: "Or start a ten-minute one" });
+    assert.equal(none.closing, "Start a two-minute campaign and watch the whole thing play out: pledge, deadline, and the money back.");
+    const bare = homePage({ campaigns: [], labels: [], desk: null, now: OPENS, block: 1n });
+    assert.equal(bare.demo, null);
+    assert.equal(bare.closing, "See how the campaigns here played out: pledge, deadline, and the money back.");
+    assert.deepEqual([WORDS.cheque.start, WORDS.cheque.startTen], ["Start a two-minute campaign", "Or start a ten-minute one"]);
+    assert.equal(WORDS.cheque.deskNote, "Start a two-minute campaign and pledge to it: watch the deadline pass and the money come back.");
     assert.deepEqual(none.totals.map((t) => t.value), ["0", "0", "0.00 USDC", "0.00 USDC", "0.00 USDC"]);
   });
 });

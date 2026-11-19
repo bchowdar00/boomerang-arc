@@ -483,7 +483,7 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
       expect,
       quote,
       askForUsdc: () => (account === null ? Promise.resolve({ ok: false as const, line: WORDS.connect }) : askForUsdc({ url: config.keeperUrl, fetch: netFetch, address: account })),
-      askForCampaign: () => askForCampaign({ url: config.keeperUrl, fetch: netFetch }),
+      askForCampaign: (kind) => askForCampaign({ url: config.keeperUrl, fetch: netFetch, kind }),
       refresh,
     };
     page =

@@ -136,15 +136,20 @@ export function Home({ ctx }: { ctx: Ctx }) {
         <h2>
           Back it early. <em>It comes back if it misses.</em>
         </h2>
-        <p className="sub">Start a ten-minute campaign and watch the whole thing play out: pledge, deadline, and the money back.</p>
+        <p className="sub">{page.closing}</p>
         {page.demo ? (
           <>
-            <button type="button" className="btn btn-ink" onClick={desk.open} disabled={desk.busy}>
-              Start a ten-minute campaign{" "}
+            <button type="button" className="btn btn-ink" onClick={() => desk.open("two")} disabled={desk.busy}>
+              {page.demo.button}{" "}
               <span className="arrow" aria-hidden="true">
                 →
               </span>
             </button>
+            <p className="other">
+              <button type="button" className="btn btn-plain" onClick={() => desk.open("ten")} disabled={desk.busy}>
+                {page.demo.other}
+              </button>
+            </p>
             {desk.line ? (
               <p className={desk.ok ? "" : "problem"} role="status">
                 {desk.line}

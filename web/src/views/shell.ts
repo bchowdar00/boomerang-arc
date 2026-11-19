@@ -152,9 +152,10 @@ export const WORDS = {
     startWith: "2.00",
     seeIt: "See the campaign.",
     noneOpen: "No campaign is taking pledges",
-    deskNote: "Start a ten-minute campaign and pledge to it: watch the deadline pass and the money come back.",
+    deskNote: "Start a two-minute campaign and pledge to it: watch the deadline pass and the money come back.",
     noneNote: "When a campaign opens, this cheque is made out to it.",
-    start: "Start a ten-minute campaign",
+    start: "Start a two-minute campaign",
+    startTen: "Or start a ten-minute one",
   },
   mine: { title: "My money", totals: "In total" },
   proof: {

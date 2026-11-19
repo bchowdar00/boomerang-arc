@@ -39,6 +39,9 @@ select.fill:disabled { opacity: 0.6; cursor: not-allowed; }
 /* What stands in the way of the button is said in ink, above the fine print; so is a pledge that is in. */
 .cq-blocks li, .cq-notes .cq-sent { color: var(--ink); font-weight: 600; }
 .cq-desk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 6px; padding-top: 12px; border-top: 1px dashed var(--guil); }
+/* The blank cheque's two offers: the two-minute campaign, and the ten-minute one under it. */
+.cq-starts { display: grid; gap: 2px; justify-items: end; }
+.cq-starts .btn-plain { font-size: 0.88rem; padding-block: 6px; }
 .cq-desk .quiet { flex: 1 1 16em; }
 .cq-desk > p[role="status"] { flex-basis: 100%; }
 
@@ -46,4 +49,5 @@ select.fill:disabled { opacity: 0.6; cursor: not-allowed; }
   .cheque { padding: 20px 18px 18px; }
   select.fill { flex-basis: 100%; }
   .cq-sign .btn { width: 100%; }
+  .cq-starts { width: 100%; justify-items: stretch; }
 }

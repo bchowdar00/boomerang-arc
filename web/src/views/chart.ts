@@ -99,3 +99,21 @@ export function valueLabelY(o: { dotRight: boolean; open: boolean; nowY: number;
   const onPace = o.open && above < o.paceLabelY + 16;
   return onTarget || onPace ? o.nowY + 20 : above;
 }
+
+/**
+ * The words at the two ends of the time axis. A campaign whose two ends fall on one UTC day (the
+ * desk's short ones, nearly always) is marked by the time of day, since the same date twice says
+ * nothing. Any other is marked by the day, and by the year as well when its ends are in
+ * different years.
+ */
+export function axisEnds(opens: bigint, closes: bigint): { opens: string; closes: string } {
+  const [a, b] = [utcStamp(opens), utcStamp(closes)]; // "19 Nov 2026, 01:25 UTC"
+  const [dayA, timeA] = a.split(", ");
+  const [dayB, timeB] = b.split(", ");
+  // A date the page cannot read has no time of day: each end is said as it stands.
+  if (timeA === undefined || timeB === undefined) return { opens: `Opens ${dayA}`, closes: `Closes ${dayB}` };
+  if (dayA === dayB) return { opens: `Opens ${timeA}`, closes: `Closes ${timeB}` };
+  const sameYear = dayA.split(" ")[2] === dayB.split(" ")[2];
+  const day = (d: string) => (sameYear ? d.split(" ").slice(0, 2).join(" ") : d);
+  return { opens: `Opens ${day(dayA)}`, closes: `Closes ${day(dayB)}` };
+}

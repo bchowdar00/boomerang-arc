@@ -18,7 +18,9 @@ export type HomePage = {
   settled: Card[];
   empty: string | null;
   /** The demo desk's offer, when this site's keeper runs one. */
-  demo: { button: string; note: string } | null;
+  demo: { button: string; other: string } | null;
+  /** The sentence over the closing button: what pressing it shows. */
+  closing: string;
   asOf: string;
 };
 
@@ -72,7 +74,11 @@ export function homePage(o: {
     running,
     settled,
     empty: o.campaigns.length === 0 ? "No campaign has been created yet." : null,
-    demo: o.desk === null ? null : { button: "Start a ten-minute campaign", note: "Opens a small campaign that runs and settles in about ten minutes. You can pledge to it and watch the money come back." },
+    demo: o.desk === null ? null : { button: "Start a two-minute campaign", other: "Or start a ten-minute one" },
+    closing:
+      o.desk === null
+        ? "See how the campaigns here played out: pledge, deadline, and the money back."
+        : "Start a two-minute campaign and watch the whole thing play out: pledge, deadline, and the money back.",
     asOf: `As of block ${o.block}`,
   };
 }

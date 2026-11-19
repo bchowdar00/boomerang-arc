@@ -209,6 +209,9 @@ describe("campaign names", function () {
     assert.deepEqual(plain, { title: "Campaign 9", by: "Paid to 0x0000…00aa", sponsorName: "0x0000…00b1", about: "", example: false, labelled: false });
     const demo = nameOf([], campaign(10n, DESK), DESK.toUpperCase().replace("0X", "0x") as `0x${string}`);
     assert.equal(demo.title, "Ten-minute campaign 10");
+    // The desk's two kinds are told apart by how long the contract holds the campaign open.
+    const timed = (openFor: bigint) => ({ id: 11n, terms: { recipient: RECIPIENT, opensAt: 1_000n, closesAt: 1_000n + openFor }, state: { sponsor: DESK } }) as unknown as CampaignView;
+    assert.deepEqual([120n, 299n, 300n, 600n].map((openFor) => nameOf([], timed(openFor), DESK).title), ["Two-minute campaign 11", "Two-minute campaign 11", "Ten-minute campaign 11", "Ten-minute campaign 11"]);
     assert.equal(demo.example, true);
     assert.equal(nameOf([], campaign(10n, DESK), null).title, "Campaign 10");
   });

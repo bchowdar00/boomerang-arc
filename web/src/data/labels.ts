@@ -75,11 +75,13 @@ export function nameOf(labels: readonly Label[], c: { id: bigint; terms: Terms; 
     };
   }
   if (desk && same(desk, c.state.sponsor)) {
+    // The desk opens two kinds, told apart by how long the contract holds the campaign open.
+    const quick = c.terms.closesAt - c.terms.opensAt < 300n;
     return {
-      title: `Ten-minute campaign ${c.id}`,
+      title: `${quick ? "Two-minute" : "Ten-minute"} campaign ${c.id}`,
       by: "Opened by this site's desk",
       sponsorName: "The desk",
-      about: "A small campaign that opens, runs and settles in about ten minutes, so you can watch every step.",
+      about: `A small campaign that takes pledges for at most ${quick ? "two" : "ten"} minutes and settles within a minute after, so you can watch every step.`,
       example: true,
       labelled: false,
     };
