@@ -10,6 +10,7 @@
 // Before any pledge, signed or two-step, a signature to this campaign that may still land (the app
 // remembers it across reloads and tabs) is waited out, so nobody pledges twice by mistake.
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { Address } from "../../../packages/kit/src/index.ts";
 
 import type { Ctx } from "../app/context.ts";
 import { hrefFor } from "../app/route.ts";
@@ -23,7 +24,7 @@ import { boardTime } from "../views/board.ts";
 import { pledgeForm, pledgeRoute, requote, stillValidLine, type Answer } from "../views/pledge.ts";
 import { receiptView, shownWhileSending } from "../views/receipt.ts";
 import { PRACTICE } from "../views/practice.ts";
-import { deskOffer, pledgeSentLine, signedButton, WORDS } from "../views/shell.ts";
+import { deskAnswerFor, deskOffer, pledgeSentLine, signedButton, WORDS } from "../views/shell.ts";
 import { useDesk } from "./desk.ts";
 import { Waves } from "./Guilloche.tsx";
 import { SendStatus } from "./parts.tsx";
@@ -105,7 +106,7 @@ export function Cheque({
   // The contract's answer, kept with the amount it was asked about and never used for another.
   const [answered, setAnswered] = useState<{ amount: bigint; answer: Answer } | null>(null);
   const [changed, setChanged] = useState<string | null>(null);
-  const [desk, setDesk] = useState<{ busy: boolean; line: string | null; ok: boolean }>({ busy: false, line: null, ok: false });
+  const [desk, setDesk] = useState<{ busy: boolean; line: string | null; ok: boolean; askedBy: Address | null }>({ busy: false, line: null, ok: false, askedBy: null });
   const asked = useRef(0);
   const field = useRef<HTMLInputElement>(null);
   const once = useRef(oneAtATime()).current; // one submit at a time, its last check included
@@ -164,7 +165,7 @@ export function Cheque({
     form: live,
     receipt: receiptView({ form: live, campaign }),
     // The desk's USDC is offered to an account that is short of it (under the 2.00 the desk gives), not to one that already holds enough.
-    offer: own.balance !== null && own.balance < 2_000_000n ? deskOffer({ desk: ctx.desk, account: ctx.account }) : null,
+    offer: own.balance !== null && own.balance < 2_000_000n ? deskOffer({ desk: ctx.desk, account: ctx.account, had: ctx.hadUsdc }) : null,
   };
   const { shown, held } = shownWhileSending({ busy, id, kept: kept.current, now: current });
   if (!busy) kept.current = { id, shown: current };
@@ -179,6 +180,7 @@ export function Cheque({
     if (!live.canSend || amount === null || quote === null) return;
     void once(async () => {
       setChanged(null);
+      setDesk((d) => (d.line === null ? d : { ...d, line: null })); // the desk's last answer has been read by now
       // Ask the contract once more. If its answer is no longer what is on the screen, show the
       // new one and stop: the visitor decides again.
       let fresh: Answer;
@@ -231,9 +233,10 @@ export function Cheque({
   };
 
   const getUsdc = async () => {
-    setDesk({ busy: true, line: null, ok: false });
+    const askedBy = ctx.account;
+    setDesk({ busy: true, line: null, ok: false, askedBy });
     const answer = await ctx.askForUsdc();
-    setDesk({ busy: false, line: answer.line, ok: answer.ok });
+    setDesk({ busy: false, line: answer.line, ok: answer.ok, askedBy });
     ctx.refresh();
   };
 
@@ -249,6 +252,7 @@ export function Cheque({
   // With one signature the button says so; the amount it names is the form's own.
   const button = ctx.account !== null && route === "signed" ? signedButton(form.button) : form.button;
   const showSent = sending !== null && sending.done && text === "";
+  const deskLine = deskAnswerFor({ line: desk.line, askedBy: desk.askedBy, account: ctx.account });
 
   return (
     <Sheet
@@ -348,15 +352,20 @@ export function Cheque({
             {pledgeSentLine(!choices)} {choices ? <a href={hrefFor({ page: "campaign", id })}>{WORDS.cheque.seeIt}</a> : null}
           </p>
         ) : null}
-        {offer ? (
+        {/* The desk's answer outlives its offer: once the desk has given, the offer goes and the answer still has to be read. */}
+        {offer || deskLine ? (
           <div className="cq-desk">
-            <button type="button" className="btn btn-line" onClick={getUsdc} disabled={desk.busy}>
-              {offer.button}
-            </button>
-            <p className="quiet">{offer.note}</p>
-            {desk.line ? (
+            {offer ? (
+              <>
+                <button type="button" className="btn btn-line" onClick={getUsdc} disabled={desk.busy || busy}>
+                  {offer.button}
+                </button>
+                <p className="quiet">{offer.note}</p>
+              </>
+            ) : null}
+            {deskLine ? (
               <p className={desk.ok ? undefined : "problem"} role="status">
-                {desk.line}
+                {deskLine}
               </p>
             ) : null}
           </div>

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { askForCampaign, askForUsdc, askKeeper, type Fetch } from "../src/data/ask.ts";
+import { givenStore } from "../src/flows/given.ts";
 
 const ME = "0x00000000000000000000000000000000000000a1";
 const URL_ = "https://keeper.example";
@@ -57,21 +58,25 @@ describe("asking the keeper", function () {
 
   it("ask.desk: each answer from the desk is said in a sentence, and an answer the page does not know is not passed on", async function () {
     const usdc = async (body: unknown, status = 200) => askForUsdc({ url: URL_, fetch: fake({ "/demo/usdc": { status, body } }).fetch, address: ME });
-    assert.deepEqual(await usdc({ ok: true, hash: "0xfeed" }), { ok: true, line: "The desk sent 2.00 USDC to your address." });
-    assert.deepEqual(await usdc({ ok: false, reason: "already-given" }, 409), { ok: false, line: "This address has already had its USDC from the desk." });
+    assert.deepEqual(await usdc({ ok: true, hash: "0xfeed" }), { ok: true, line: "The desk sent 2.00 USDC to your address.", had: true });
+    assert.deepEqual(await usdc({ ok: false, reason: "already-given" }, 409), { ok: false, line: "This address has already had its USDC from the desk.", had: true });
+    // `had`: the desk will not send to this address again. True when it sent, had sent before, or
+    // sent something it could not confirm; false for every answer after which asking again may work.
+    assert.equal((await usdc({ ok: false, reason: "unconfirmed" }, 409)).had, true);
+    for (const reason of ["desk-low", "busy", "no-desk", "failed", "bad-address", "something-new"]) assert.equal((await usdc({ ok: false, reason }, 409)).had, false, reason);
     assert.match((await usdc({ ok: false, reason: "desk-low" }, 409)).line, /out of USDC/);
     assert.match((await usdc({ ok: false, reason: "unconfirmed" }, 409)).line, /will not send to this address again/);
     assert.match((await usdc({ ok: false, reason: "busy" }, 409)).line, /busy/);
     assert.match((await usdc({ ok: false, reason: "no-desk" }, 503)).line, /not running a desk/);
     // The keeper's own words (a reason this page has no sentence for, a detail field) never reach the page.
-    assert.deepEqual(await usdc({ ok: false, reason: "<b>pwned</b>", detail: "<script>" }, 409), { ok: false, line: "The desk could not do that just now." });
+    assert.deepEqual(await usdc({ ok: false, reason: "<b>pwned</b>", detail: "<script>" }, 409), { ok: false, line: "The desk could not do that just now.", had: false });
     // A reason that names an inherited Object property is not a known refusal: it falls back, never returns a function or object.
     for (const reason of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
-      assert.deepEqual(await usdc({ ok: false, reason }, 409), { ok: false, line: "The desk could not do that just now." }, reason);
+      assert.deepEqual(await usdc({ ok: false, reason }, 409), { ok: false, line: "The desk could not do that just now.", had: false }, reason);
     }
-    for (const odd of [null, "ok", 5, { ok: "true" }, [], "not json"]) assert.deepEqual(await usdc(odd), { ok: false, line: "The desk could not be reached." }, String(odd));
-    assert.deepEqual(await askForUsdc({ url: null, fetch: fake({}).fetch, address: ME }), { ok: false, line: "The desk could not be reached." });
-    assert.deepEqual(await askForUsdc({ url: URL_, fetch: fake({ "/demo/usdc": { fail: true } }).fetch, address: ME }), { ok: false, line: "The desk could not be reached." });
+    for (const odd of [null, "ok", 5, { ok: "true" }, [], "not json"]) assert.deepEqual(await usdc(odd), { ok: false, line: "The desk could not be reached.", had: false }, String(odd));
+    assert.deepEqual(await askForUsdc({ url: null, fetch: fake({}).fetch, address: ME }), { ok: false, line: "The desk could not be reached.", had: false });
+    assert.deepEqual(await askForUsdc({ url: URL_, fetch: fake({ "/demo/usdc": { fail: true } }).fetch, address: ME }), { ok: false, line: "The desk could not be reached.", had: false });
 
     // The request itself: a POST of the address as JSON, nothing else.
     const f = fake({ "/demo/usdc": { body: { ok: true } } });
@@ -98,5 +103,40 @@ describe("asking the keeper", function () {
     }
     // A keeper that does not know the two-minute path (an older one) is a desk that could not be reached: nothing is opened.
     assert.deepEqual(await askForCampaign({ url: URL_, fetch: fake({ "/demo/campaign": { body: { ok: true, id: "7" } } }).fetch, kind: "two" }), { ok: false, line: "The desk could not be reached.", id: null });
+  });
+
+  it("flows.given: an address the desk will not send to again is remembered per chain, across page loads, and without storage", function () {
+    const backing = new Map<string, string>();
+    const storage = { getItem: (k: string) => backing.get(k) ?? null, setItem: (k: string, v: string) => void backing.set(k, v) };
+    const a = givenStore(storage, 5042002);
+    assert.equal(a.has(ME), false);
+    a.add(ME);
+    assert.equal(a.has(ME), true);
+    assert.equal(a.has(ME.toUpperCase().replace("0X", "0x") as `0x${string}`), true, "an address is the same in any case");
+    // A second page (a reload, another tab) knows; another chain does not.
+    assert.equal(givenStore(storage, 5042002).has(ME), true);
+    assert.equal(givenStore(storage, 31337).has(ME), false);
+    // The page that was told keeps it whatever happens to storage.
+    backing.clear();
+    assert.equal(a.has(ME), true);
+    // Junk in storage is ignored, not trusted.
+    backing.set("boomerang:desk-given:5042002", '["nope", 7, {"a":1}, "0x12"]');
+    assert.equal(givenStore(storage, 5042002).has(ME), false);
+    backing.set("boomerang:desk-given:5042002", "not json");
+    assert.equal(givenStore(storage, 5042002).has(ME), false);
+    // Storage that throws, or none at all: this page's memory stands in.
+    const broken = givenStore({ getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } }, 5042002);
+    broken.add(ME);
+    assert.equal(broken.has(ME), true);
+    const none = givenStore(null, 5042002);
+    none.add(ME);
+    assert.equal(none.has(ME), true);
+    // It keeps the newest fifty and no more.
+    const many = givenStore(storage, 1);
+    const nth = (i: number) => `0x${i.toString(16).padStart(40, "0")}` as `0x${string}`;
+    for (let i = 0; i < 60; i++) many.add(nth(i));
+    assert.equal((JSON.parse(backing.get("boomerang:desk-given:1")!) as unknown[]).length, 50);
+    assert.equal(givenStore(storage, 1).has(nth(59)), true);
+    assert.equal(givenStore(storage, 1).has(nth(0)), false);
   });
 });

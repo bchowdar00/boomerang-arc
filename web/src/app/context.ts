@@ -58,6 +58,8 @@ export type Ctx = {
   /** Ask the contract what a pledge of `amount` to campaign `id` would do, now. */
   quote(id: bigint, amount: bigint): Promise<Answer>;
   askForUsdc(): Promise<DeskAnswer>;
+  /** Whether the desk has said it will not send USDC to the connected account again (it gave, or had given). */
+  hadUsdc: boolean;
   askForCampaign(kind: DeskKind): Promise<DeskAnswer & { id: bigint | null }>;
   refresh(): void;
 };

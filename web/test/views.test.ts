@@ -742,7 +742,7 @@ describe("the Proof page", function () {
 });
 
 // The frame around every page.
-import { deskOffer, shell, signedButton, stepLine } from "../src/views/shell.ts";
+import { deskAnswerFor, deskOffer, shell, signedButton, stepLine } from "../src/views/shell.ts";
 
 describe("the frame around every page", function () {
   const arc = { id: 5042002, name: "Arc Testnet", local: false };
@@ -799,9 +799,17 @@ describe("the frame around every page", function () {
   });
 
   it("the desk's offer and the steps of a send", function () {
-    assert.equal(deskOffer({ desk: null, account: ME }), null);
-    assert.equal(deskOffer({ desk: SPONSOR, account: null }), null);
-    assert.deepEqual(deskOffer({ desk: SPONSOR, account: ME }), { button: "Get 2.00 USDC", note: "From this site's desk, once per address. Circle's faucet for Arc Testnet gives more." });
+    assert.equal(deskOffer({ desk: null, account: ME, had: false }), null);
+    assert.equal(deskOffer({ desk: SPONSOR, account: null, had: false }), null);
+    assert.equal(deskOffer({ desk: SPONSOR, account: ME, had: true }), null, "an address the desk will not send to again is not offered it");
+    // The desk's answer is about the address that asked: after a change of wallet it is not shown.
+    const sent = "The desk sent 2.00 USDC to your address.";
+    assert.equal(deskAnswerFor({ line: sent, askedBy: ME, account: ME.toUpperCase().replace("0X", "0x") as `0x${string}` }), sent);
+    assert.equal(deskAnswerFor({ line: sent, askedBy: ME, account: SPONSOR }), null);
+    assert.equal(deskAnswerFor({ line: sent, askedBy: ME, account: null }), null);
+    assert.equal(deskAnswerFor({ line: null, askedBy: ME, account: ME }), null);
+    assert.equal(deskAnswerFor({ line: sent, askedBy: null, account: ME }), null);
+    assert.deepEqual(deskOffer({ desk: SPONSOR, account: ME, had: false }), { button: "Get 2.00 USDC", note: "From this site's desk, once per address. Circle's faucet for Arc Testnet gives more." });
     assert.equal(stepLine({ index: 0, label: "Allow the contract to take 25.00 USDC", state: "asking" }, 2), "Step 1 of 2: Allow the contract to take 25.00 USDC. Confirm it in your wallet.");
     assert.equal(stepLine({ index: 1, label: "Pledge 25.00 USDC", state: "sent" }, 2), "Step 2 of 2: Pledge 25.00 USDC. Sent; waiting for the chain.");
     assert.equal(stepLine({ index: 0, label: "Settle campaign 7", state: "done" }, 1), "Settle campaign 7. Done.");

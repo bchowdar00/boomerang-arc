@@ -96,10 +96,15 @@ export function signedButton(button: string): string {
   return button.startsWith("Pledge") ? WORDS.cheque.sign + button.slice("Pledge".length) : button;
 }
 
-/** The desk's offer of USDC, shown where a visitor is short of it. Null when there is no desk or no account. */
-export function deskOffer(o: { desk: Address | null; account: Address | null }): { button: string; note: string } | null {
-  if (o.desk === null || o.account === null) return null;
+/** The desk's offer of USDC, shown where a visitor is short of it. Null when there is no desk or no account, and for an address the desk will not send to again (`had`). */
+export function deskOffer(o: { desk: Address | null; account: Address | null; had: boolean }): { button: string; note: string } | null {
+  if (o.desk === null || o.account === null || o.had) return null;
   return { button: "Get 2.00 USDC", note: "From this site's desk, once per address. Circle's faucet for Arc Testnet gives more." };
+}
+
+/** The desk's answer under the cheque, shown only to the account that asked: after a change of wallet it would be about someone else's address. */
+export function deskAnswerFor(o: { line: string | null; askedBy: Address | null; account: Address | null }): string | null {
+  return o.line !== null && o.askedBy !== null && o.account !== null && o.askedBy.toLowerCase() === o.account.toLowerCase() ? o.line : null;
 }
 
 /** One step of a send, as the visitor reads it while their wallet is asking or the chain is working. With the practice wallet there is nothing to confirm: it sends at once. */

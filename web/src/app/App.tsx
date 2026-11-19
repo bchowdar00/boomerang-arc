@@ -9,6 +9,7 @@ import { askForCampaign, askForUsdc, askKeeper, askRelay, type Fetch } from "../
 import { explain } from "../data/errors.ts";
 import type { Label } from "../data/labels.ts";
 import { oneAtATime, sendEach, type Call } from "../flows/calls.ts";
+import { givenStore } from "../flows/given.ts";
 import { outstandingStore, signedWait } from "../flows/outstanding.ts";
 import { authorization, newSalt, relayBody } from "../flows/signed.ts";
 import { Campaign } from "../pages/Campaign.tsx";
@@ -213,6 +214,24 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
     refresh(); // a new account's figures are read at once
   }, [account, refresh]);
 
+  // Ask the desk for USDC, and remember an address it will not send to again, so the page stops
+  // offering it. `givenSeen` only makes the page look again once the store has changed.
+  // A local chain starts again from nothing at each run while the browser keeps its keys, so
+  // nothing about a local desk is kept beyond this page.
+  const given = useMemo(() => givenStore(config.chain.local ? null : browserStorage(), config.chain.id), [config]);
+  const [, setGivenSeen] = useState(0);
+  const askDesk = useCallback(
+    async (address: Address) => {
+      const answer = await askForUsdc({ url: config.keeperUrl, fetch: netFetch, address });
+      if (answer.had) {
+        given.add(address);
+        setGivenSeen((n) => n + 1);
+      }
+      return answer;
+    },
+    [config, given],
+  );
+
   // Start the practice wallet, or pick it up again. A new one has nothing in it, so the desk is
   // asked for USDC at once and its answer is shown in the notices.
   const startPractice = useCallback(async () => {
@@ -223,13 +242,13 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
       if (!(await use(practiceW, true)) || !fresh) return;
       const address = await connected(practiceW.provider);
       if (address === null) return;
-      const desk = await askForUsdc({ url: config.keeperUrl, fetch: netFetch, address });
+      const desk = await askDesk(address);
       setPracticeNote(practiceResult({ asked: true, desk }));
       refresh();
     } finally {
       setPracticeBusy(false);
     }
-  }, [practiceStore, practiceW, use, config, refresh]);
+  }, [practiceStore, practiceW, use, askDesk, refresh]);
   // A page with reads of its own (a campaign's backers, another account's money) gets them at once, not at the next tick.
   useEffect(() => {
     if (shownId !== null || onMine) refresh();
@@ -482,7 +501,8 @@ export function App({ config, labels, extraWallet }: { config: Config; labels: r
       expected: (id) => expecting.some((e) => e.id === id && Date.now() < e.until),
       expect,
       quote,
-      askForUsdc: () => (account === null ? Promise.resolve({ ok: false as const, line: WORDS.connect }) : askForUsdc({ url: config.keeperUrl, fetch: netFetch, address: account })),
+      askForUsdc: () => (account === null ? Promise.resolve({ ok: false as const, line: WORDS.connect }) : askDesk(account)),
+      hadUsdc: account !== null && given.has(account),
       askForCampaign: (kind) => askForCampaign({ url: config.keeperUrl, fetch: netFetch, kind }),
       refresh,
     };

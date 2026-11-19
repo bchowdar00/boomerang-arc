@@ -83,9 +83,15 @@ export async function askRelay(o: { url: string | null; fetch: Fetch; body: unkn
   }
 }
 
+// The refusals after which the desk counts the address as given and will not send to it again.
+const GIVEN = new Set(["already-given", "unconfirmed"]);
+/** The desk's answer about USDC. `had` says the desk will not send to this address again: it sent just now, had sent before, or sent something it could not confirm. */
+export type UsdcAnswer = DeskAnswer & { had: boolean };
+
 /** Ask the desk for test USDC for `address`. */
-export async function askForUsdc(o: { url: string | null; fetch: Fetch; address: Address; timeoutMs?: number }): Promise<DeskAnswer> {
-  return said(await post(o, "/demo/usdc", { address: o.address }), "The desk sent 2.00 USDC to your address.");
+export async function askForUsdc(o: { url: string | null; fetch: Fetch; address: Address; timeoutMs?: number }): Promise<UsdcAnswer> {
+  const a = await post(o, "/demo/usdc", { address: o.address });
+  return { ...said(a, "The desk sent 2.00 USDC to your address."), had: a !== null && (a.ok || GIVEN.has(a.reason)) };
 }
 
 /** The two campaigns the desk opens: the same pots on different times. */
