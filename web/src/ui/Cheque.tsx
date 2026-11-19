@@ -21,7 +21,7 @@ import { parseUsd } from "../data/money.ts";
 import { oneAtATime } from "../flows/calls.ts";
 import { boardTime } from "../views/board.ts";
 import { pledgeForm, pledgeRoute, requote, stillValidLine, type Answer } from "../views/pledge.ts";
-import { receiptView } from "../views/receipt.ts";
+import { receiptView, shownWhileSending } from "../views/receipt.ts";
 import { PRACTICE } from "../views/practice.ts";
 import { deskOffer, pledgeSentLine, signedButton, WORDS } from "../views/shell.ts";
 import { useDesk } from "./desk.ts";
@@ -138,7 +138,7 @@ export function Cheque({
   }, [id, typed, block]);
 
   const own = ownIn(world, ctx.account);
-  const form = pledgeForm({
+  const live = pledgeForm({
     campaign,
     where: { boomerang: config.boomerang, usdc: config.usdc },
     amountText: text,
@@ -153,19 +153,30 @@ export function Cheque({
     // On Arc gas is paid in USDC. A pledge the visitor sends themself (the two-step route) needs some left over; one the keeper relays does not.
     gasReserve: !config.chain.local && pledgeRoute({ signedPledge: config.signedPledge, relay: ctx.relay, fellBack: twoStep }) !== "signed" ? GAS_RESERVE : 0n,
   });
-  const receipt = receiptView({ form, campaign });
   const key = `pledge:${id}`;
   const sending = ctx.sendState(key);
-  // The desk's USDC is offered to an account that is short of it (under the 2.00 the desk gives), not to one that already holds enough.
-  const offer = own.balance !== null && own.balance < 2_000_000n ? deskOffer({ desk: ctx.desk, account: ctx.account }) : null;
+  const busy = sending !== null && sending.busy;
+  // While a pledge is on its way the cheque keeps what it showed at the press: the receipt, the
+  // button, what stands in the way and the desk's offer. The form above is still worked out from
+  // the chain as it is now, and is what the cheque goes back to the moment the send ends.
+  const kept = useRef<{ id: bigint; shown: { form: typeof live; receipt: ReturnType<typeof receiptView>; offer: ReturnType<typeof deskOffer> } } | null>(null);
+  const current = {
+    form: live,
+    receipt: receiptView({ form: live, campaign }),
+    // The desk's USDC is offered to an account that is short of it (under the 2.00 the desk gives), not to one that already holds enough.
+    offer: own.balance !== null && own.balance < 2_000_000n ? deskOffer({ desk: ctx.desk, account: ctx.account }) : null,
+  };
+  const { shown, held } = shownWhileSending({ busy, id, kept: kept.current, now: current });
+  if (!busy) kept.current = { id, shown: current };
+  const { form, receipt, offer } = shown;
   const route = pledgeRoute({ signedPledge: config.signedPledge, relay: ctx.relay, fellBack: twoStep });
 
   const submit = () => {
     const account = ctx.account;
     // Nobody connected: the button connects the browser's wallet, or, where there is none, starts a practice one.
     if (account === null) return ctx.hasWallet ? ctx.connect() : ctx.practice?.();
-    const { amount, quote, calls } = form;
-    if (!form.canSend || amount === null || quote === null) return;
+    const { amount, quote, calls } = live;
+    if (!live.canSend || amount === null || quote === null) return;
     void once(async () => {
       setChanged(null);
       // Ask the contract once more. If its answer is no longer what is on the screen, show the
@@ -230,10 +241,11 @@ export function Cheque({
   const opens = world.now < t.opensAt;
   const clock = opens ? `${WORDS.cheque.opensIn} ${span(t.opensAt - world.now)}` : `${WORDS.cheque.closesIn} ${span(t.closesAt - world.now)}`;
   const name = nameOf(ctx.labels, campaign, config.desk).title;
-  // While a pledge is on its way nothing is listed as standing in its way: the account's balance
-  // falls the moment the pledge lands, and "holds 0.00, less than this pledge" would read as a
-  // failure in the seconds before the form is cleared.
-  const others = sending !== null && sending.busy ? [] : form.blocks.filter((b) => b !== form.line);
+  // A cheque opened while its pledge is already on its way, or come back to from another
+  // campaign's page, has nothing kept from before the press. It lists nothing as standing in the
+  // way: the balance fell when the pledge landed, and "holds 0.00, less than this pledge" would
+  // read as a failure.
+  const others = busy && !held ? [] : form.blocks.filter((b) => b !== form.line);
   // With one signature the button says so; the amount it names is the form's own.
   const button = ctx.account !== null && route === "signed" ? signedButton(form.button) : form.button;
   const showSent = sending !== null && sending.done && text === "";
@@ -254,7 +266,7 @@ export function Cheque({
       {choices && choices.length > 1 ? (
         <label className="cq-row">
           {WORDS.cheque.payTo}{" "}
-          <select className="fill" value={id.toString()} disabled={sending !== null && sending.busy} onChange={(e) => onChoose?.(BigInt(e.target.value))}>
+          <select className="fill" value={id.toString()} disabled={busy} onChange={(e) => onChoose?.(BigInt(e.target.value))}>
             {choices.map((c) => (
               <option key={c.id.toString()} value={c.id.toString()}>
                 {c.title}
@@ -277,6 +289,7 @@ export function Cheque({
           inputMode="decimal"
           autoComplete="off"
           value={text}
+          readOnly={busy}
           onChange={(e) => setText(e.target.value)}
           aria-describedby="pledge-line"
         />{" "}

@@ -12,7 +12,7 @@ import { agoLine, agoOf, boardTime, boardView, settledLine } from "../src/views/
 import { axisEnds, chartPaths, chartView, climbOf, valueLabelY } from "../src/views/chart.ts";
 import { changedPositions } from "../src/views/flip.ts";
 import { pledgeForm } from "../src/views/pledge.ts";
-import { receiptView } from "../src/views/receipt.ts";
+import { receiptView, shownWhileSending } from "../src/views/receipt.ts";
 
 const RECIPIENT = "0x00000000000000000000000000000000000000aa" as const;
 const SPONSOR = "0x00000000000000000000000000000000000000b1" as const;
@@ -249,6 +249,41 @@ describe("receipt.two", () => {
     const r = receiptView({ form: form(c, "50", OPENS + 2n * DAY, { wouldFund: false, counted: usd(50), bonus: 0n }), campaign: c });
     assert.equal(r.kind === "two" && r.missed.line, "comes back to you in full. The early bonus window has closed.");
     assert.equal(r.kind === "two" && r.missed.live, false);
+  });
+});
+
+describe("receipt.held", () => {
+  // Seen on Arc (campaign 8): a pledge of 2.00 was on its way, the chain already counted it, and
+  // the cheque worked the 2.00 still typed out again as a second pledge that would finish the campaign.
+  const t = { target: usd(3), minPledge: usd(0.1), matchAmount: usd(1), bonusPool: usd(0.3), rateBps: 2000 };
+  const before = campaign(t, { pledged: 0n, pledgedEarly: 0n, weighted: 0n, backers: 0 });
+  const after = campaign(t, { pledged: usd(2), pledgedEarly: usd(2), weighted: usd(2) * 1_000_000n, backers: 1 });
+  const pressed = form(before, "2.00", OPENS + 50n, { wouldFund: false, counted: usd(2), bonus: usd(0.2) });
+  const landed = form(after, "2.00", OPENS + 53n, { wouldFund: true, counted: usd(1), bonus: 0n });
+  const kept = { form: pressed, receipt: receiptView({ form: pressed, campaign: before }) };
+  const now = { form: landed, receipt: receiptView({ form: landed, campaign: after }) };
+
+  it("is a different receipt once the chain counts the pledge, which is why it must not be shown", () => {
+    assert.equal(kept.receipt.kind, "two");
+    assert.equal(now.receipt.kind, "completes");
+  });
+
+  it("keeps what the cheque showed at the press for as long as the pledge is on its way", () => {
+    const { shown, held } = shownWhileSending({ busy: true, id: 7n, kept: { id: 7n, shown: kept }, now });
+    assert.equal(held, true);
+    assert.equal(shown, kept);
+    assert.equal(shown.receipt.kind === "two" && shown.receipt.missed.figure, "2.20 USDC");
+    assert.equal(shown.form.button, pressed.button);
+  });
+
+  it("shows what is true now as soon as the send ends, whether it went through or not", () => {
+    assert.deepEqual(shownWhileSending({ busy: false, id: 7n, kept: { id: 7n, shown: kept }, now }), { shown: now, held: false });
+  });
+
+  it("never shows another campaign's cheque, and has nothing to keep when it was opened mid-send", () => {
+    // The same form serves every campaign's page: what it kept for campaign 8 is not campaign 7's.
+    assert.deepEqual(shownWhileSending({ busy: true, id: 7n, kept: { id: 8n, shown: kept }, now }), { shown: now, held: false });
+    assert.deepEqual(shownWhileSending({ busy: true, id: 7n, kept: null, now }), { shown: now, held: false });
   });
 });
 

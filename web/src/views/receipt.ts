@@ -26,3 +26,18 @@ export function receiptView(o: { form: PledgeForm; campaign: CampaignView }): Re
         : "comes back to you in full. The early bonus window has closed.";
   return { kind: "two", met, missed: { heading: "If it falls short", figure: `${formatUsd(q.back)} USDC`, line, live: q.early && q.bonus > 0n } };
 }
+
+/**
+ * What the cheque shows. While a pledge is on its way it keeps what it showed when the pledge was
+ * pressed. The chain moves under a pledge being sent (the pledge itself is counted, the balance
+ * falls), and working the amount still typed out again against that reads as a second pledge.
+ *
+ * `kept` is what this cheque last showed while nothing was being sent, with the campaign it was
+ * for. One form serves every campaign's page, so what it kept for another campaign is not used;
+ * and a cheque first opened while its pledge is already on its way has nothing kept. In both
+ * cases it shows the form as it is now and `held` is false.
+ */
+export function shownWhileSending<T>(o: { busy: boolean; id: bigint; kept: { id: bigint; shown: T } | null; now: T }): { shown: T; held: boolean } {
+  if (o.busy && o.kept !== null && o.kept.id === o.id) return { shown: o.kept.shown, held: true };
+  return { shown: o.now, held: false };
+}
