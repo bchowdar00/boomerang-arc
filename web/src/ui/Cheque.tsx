@@ -230,7 +230,10 @@ export function Cheque({
   const opens = world.now < t.opensAt;
   const clock = opens ? `${WORDS.cheque.opensIn} ${span(t.opensAt - world.now)}` : `${WORDS.cheque.closesIn} ${span(t.closesAt - world.now)}`;
   const name = nameOf(ctx.labels, campaign, config.desk).title;
-  const others = form.blocks.filter((b) => b !== form.line);
+  // While a pledge is on its way nothing is listed as standing in its way: the account's balance
+  // falls the moment the pledge lands, and "holds 0.00, less than this pledge" would read as a
+  // failure in the seconds before the form is cleared.
+  const others = sending !== null && sending.busy ? [] : form.blocks.filter((b) => b !== form.line);
   // With one signature the button says so; the amount it names is the form's own.
   const button = ctx.account !== null && route === "signed" ? signedButton(form.button) : form.button;
   const showSent = sending !== null && sending.done && text === "";

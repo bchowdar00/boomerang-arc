@@ -1955,7 +1955,10 @@ describe("keeper against the contract", async function () {
     });
 
     // The two kinds, as fixed numbers: the ten-minute one is unchanged.
-    assert.deepEqual(DESK_KINDS, { ten: { opensIn: 60n, earlyFor: 360n, openFor: 600n }, two: { opensIn: 45n, earlyFor: 72n, openFor: 120n } });
+    assert.deepEqual(DESK_KINDS, {
+      ten: { opensIn: 60n, earlyFor: 360n, openFor: 600n, linearWeight: true },
+      two: { opensIn: 45n, earlyFor: 72n, openFor: 120n, linearWeight: false },
+    });
     assert.deepEqual([DEMO.opensIn, DEMO.earlyFor, DEMO.openFor], [60n, 360n, 600n]);
 
     const before = BigInt(await w.time.latest());
@@ -1966,7 +1969,9 @@ describe("keeper against the contract", async function () {
     const t = await w.boomerang.read.termsOf([id]);
     assert.deepEqual([t.opensAt - before, t.earlyUntil - t.opensAt, t.closesAt - t.opensAt], [45n, 72n, 120n]);
     assert.deepEqual([t.target, t.minPledge, t.matchAmount, t.bonusPool, t.rateBps], [DEMO.target, DEMO.minPledge, DEMO.match, DEMO.pool, DEMO.rateBps]);
-    assert.deepEqual([t.linearWeight, t.bonusFromRecipient], [true, false]);
+    // The short kind's bonus does not shrink inside its early window: over 72 seconds a
+    // shrinking one falls a cent every few seconds, faster than a visitor can read and press.
+    assert.deepEqual([t.linearWeight, t.bonusFromRecipient], [false, false]);
     const s = await w.boomerang.read.stateOf([id]);
     assert.ok(s.matchIn && s.bonusIn, "both pots are in");
     assert.ok(BigInt(await w.time.latest()) < t.opensAt, "it is not open yet");
@@ -1994,20 +1999,29 @@ describe("keeper against the contract", async function () {
 
     // A lone early backer cannot meet the target: at the deadline the keeper settles it as
     // missed, and the pledge comes back with a bonus from the pool.
-    const pledge = 500_000n;
-    await w.pledge(id, w.alice, pledge, t.opensAt + 5n); // the helper mints exactly this much to the backer first
+    // The contract's own answer for the desk's 2.00 is the same early and late in the early
+    // window, so the figure on the cheque holds still while it is read; after the window, nothing.
+    const pledge = DEMO.usdc;
+    const answers: bigint[] = [];
+    for (const at of [t.opensAt + 5n, t.opensAt + 40n, t.earlyUntil - 20n]) {
+      await w.time.increaseTo(at);
+      answers.push((await w.boomerang.read.quoteIfMissed([id, pledge]))[2]);
+    }
+    assert.deepEqual(answers, [200_000n, 200_000n, 200_000n]);
+    await w.pledge(id, w.alice, pledge, t.earlyUntil - 5n); // late in the window; the helper mints exactly this much to the backer first
     assert.equal(await w.usdc.read.balanceOf([w.alice.account.address]), 0n);
+    await w.time.increaseTo(t.earlyUntil);
+    assert.equal((await w.boomerang.read.quoteIfMissed([id, 100_000n]))[2], 0n); // a pledge after the early window earns no bonus
     await w.time.increaseTo(t.closesAt);
     await pump(w, keeper, 4);
     assert.equal((await w.boomerang.read.stateOf([id])).outcome, Outcome.Missed);
-    const back = await w.usdc.read.balanceOf([w.alice.account.address]);
-    assert.ok(back > pledge && back <= pledge + DEMO.pool, `back ${back}`);
+    assert.equal(await w.usdc.read.balanceOf([w.alice.account.address]), pledge + 200_000n); // 2.00 back, plus 0.20
 
     // Once it is settled, either kind may open; the default is still the ten-minute one.
     const r2 = await desk.openCampaign();
     assert.ok(r2.ok && r2.id, JSON.stringify(r2));
     const t2 = await w.boomerang.read.termsOf([BigInt(r2.id!)]);
-    assert.deepEqual([t2.earlyUntil - t2.opensAt, t2.closesAt - t2.opensAt], [360n, 600n]);
+    assert.deepEqual([t2.earlyUntil - t2.opensAt, t2.closesAt - t2.opensAt, t2.linearWeight], [360n, 600n, true]);
     assert.deepEqual(await desk.openCampaign("two"), { ok: false, reason: "campaign-open" });
 
     // A kind the desk does not know opens nothing.

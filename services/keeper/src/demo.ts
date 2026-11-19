@@ -34,7 +34,7 @@ export const DEMO = {
   minPledge: 100_000n,
   match: 1_000_000n,
   pool: 300_000n,
-  // The design's defaults: pool 10% of the target, rate 20%, early window 60% of the time open, linear weight.
+  // The design's defaults: pool 10% of the target, rate 20%, early window 60% of the time open.
   rateBps: 2000,
   // The ten-minute campaign's times, in seconds: how long after the request it opens, how long
   // the early window is, and how long it takes pledges.
@@ -43,13 +43,19 @@ export const DEMO = {
   openFor: 600n,
 } as const;
 
-// The two campaigns the desk opens. They differ only in their times: the pots, the target and the
-// rate are the same. The two-minute one is for watching the whole thing in one sitting. It opens
-// 45 seconds after the request, because both pots must be locked before a campaign opens or the
-// contract voids it; on Arc that takes about a quarter of a minute.
+// The two campaigns the desk opens. The pots, the target and the rate are the same. The
+// two-minute one is for watching the whole thing in one sitting. It opens 45 seconds after the
+// request, because both pots must be locked before a campaign opens or the contract voids it; on
+// Arc that takes about a quarter of a minute.
+//
+// The ten-minute one pays an early pledge more the earlier it comes (the design's default). The
+// two-minute one pays every pledge in its early window the same. Over 72 seconds a bonus that
+// shrinks falls a cent every few seconds on the desk's 2.00, and the page, which asks the contract
+// again at each press and stops when the figure it showed has fallen, stopped two presses out of
+// three (seen on Arc, campaign 7).
 export const DESK_KINDS = {
-  ten: { opensIn: DEMO.opensIn, earlyFor: DEMO.earlyFor, openFor: DEMO.openFor },
-  two: { opensIn: 45n, earlyFor: 72n, openFor: 120n },
+  ten: { opensIn: DEMO.opensIn, earlyFor: DEMO.earlyFor, openFor: DEMO.openFor, linearWeight: true },
+  two: { opensIn: 45n, earlyFor: 72n, openFor: 120n, linearWeight: false },
 } as const;
 export type DeskKind = keyof typeof DESK_KINDS;
 // The furthest closing time the desk can write: the bound on what it believes of its own note.
@@ -225,7 +231,7 @@ export function createDesk(o: {
     }
   }
 
-  async function open(times: { opensIn: bigint; earlyFor: bigint; openFor: bigint }): Promise<DeskResult> {
+  async function open(times: { opensIn: bigint; earlyFor: bigint; openFor: bigint; linearWeight: boolean }): Promise<DeskResult> {
     const now = (await publicClient.getBlock()).timestamp;
     // A closing time further off than any campaign this desk opens is not one it wrote: ignored.
     if (last !== null && now < last.closesAt && last.closesAt <= now + LONGEST) {
@@ -258,7 +264,7 @@ export function createDesk(o: {
       matchAmount: DEMO.match,
       bonusPool: DEMO.pool,
       rateBps: DEMO.rateBps,
-      linearWeight: true,
+      linearWeight: times.linearWeight,
       bonusFromRecipient: false,
     };
     // Made ready first: if that fails, nothing was sent and nothing is remembered.
