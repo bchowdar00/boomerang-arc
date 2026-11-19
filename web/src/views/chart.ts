@@ -83,3 +83,19 @@ export function chartPaths(v: ChartView, box: { w: number; h: number }) {
   const band = v.early === null ? null : { x: x(v.early.from), w: r(x(v.early.to) - x(v.early.from)) };
   return { climb, pace: `M0,${r(box.h)} L${r(box.w)},0`, targetY: 0, band, nowX, nowY: y(v.total) };
 }
+
+/** The baseline of TARGET's label, which is set flush right above the target line. */
+export const TARGET_LABEL_Y = -8;
+
+/**
+ * The baseline of the total's label. Beside its point it sits just above it. At the right end it
+ * is set to the left of the point, where it would land on TARGET when the total is near the
+ * target, and on PACE NEEDED while pledges can still come in; there it goes under the point.
+ */
+export function valueLabelY(o: { dotRight: boolean; open: boolean; nowY: number; paceLabelY: number }): number {
+  const above = o.nowY - 8;
+  if (o.dotRight) return above;
+  const onTarget = above < TARGET_LABEL_Y + 16;
+  const onPace = o.open && above < o.paceLabelY + 16;
+  return onTarget || onPace ? o.nowY + 20 : above;
+}

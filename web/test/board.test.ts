@@ -9,7 +9,7 @@ import type { FeedItem, LedgerView } from "../src/data/keeper.ts";
 import type { CampaignView } from "../src/data/load.ts";
 import { utcStamp } from "../src/data/time.ts";
 import { agoLine, agoOf, boardTime, boardView, settledLine } from "../src/views/board.ts";
-import { chartPaths, chartView, climbOf } from "../src/views/chart.ts";
+import { chartPaths, chartView, climbOf, valueLabelY } from "../src/views/chart.ts";
 import { changedPositions } from "../src/views/flip.ts";
 import { pledgeForm } from "../src/views/pledge.ts";
 import { receiptView } from "../src/views/receipt.ts";
@@ -310,5 +310,24 @@ describe("board.settled", () => {
   it("any other outcome has no such line", () => {
     assert.equal(settledLine(campaign({}, { outcome: Outcome.Funded })), null);
     assert.equal(settledLine(campaign()), null);
+  });
+});
+
+describe("chart.valueLabel", () => {
+  // The target's label is set at y -8, flush right; the pace label under the pace line's end.
+  it("chart.valueLabel.cleared: at the right end of a campaign that met its target the total goes under its point, not onto TARGET", () => {
+    assert.equal(valueLabelY({ dotRight: false, open: false, nowY: 0, paceLabelY: 40 }), 20);
+    assert.equal(valueLabelY({ dotRight: false, open: false, nowY: 10, paceLabelY: 40 }), 30);
+  });
+  it("chart.valueLabel.missed: at the right end of a closed campaign well under its target the total stays above its point", () => {
+    assert.equal(valueLabelY({ dotRight: false, open: false, nowY: 100, paceLabelY: 40 }), 92);
+  });
+  it("chart.valueLabel.pace: at the right end of an open campaign the total keeps clear of PACE NEEDED, as before", () => {
+    assert.equal(valueLabelY({ dotRight: false, open: true, nowY: 50, paceLabelY: 40 }), 70);
+    assert.equal(valueLabelY({ dotRight: false, open: true, nowY: 100, paceLabelY: 40 }), 92);
+  });
+  it("chart.valueLabel.left: away from the right end the total is beside its point and stays above it", () => {
+    assert.equal(valueLabelY({ dotRight: true, open: true, nowY: 0, paceLabelY: 40 }), -8);
+    assert.equal(valueLabelY({ dotRight: true, open: false, nowY: 50, paceLabelY: 40 }), 42);
   });
 });

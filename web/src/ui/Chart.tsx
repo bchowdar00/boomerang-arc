@@ -7,7 +7,7 @@ import type { LedgerView } from "../data/keeper.ts";
 import type { CampaignView } from "../data/load.ts";
 import { formatUsd } from "../data/money.ts";
 import { utcStamp } from "../data/time.ts";
-import { chartPaths, chartView } from "../views/chart.ts";
+import { chartPaths, chartView, TARGET_LABEL_Y, valueLabelY } from "../views/chart.ts";
 
 const TOP = 26;
 const BOTTOM = 26;
@@ -64,9 +64,8 @@ export function Chart({ campaign, ledger, now, raised, backers, live }: { campai
   }
   const taking = now < v.closes && now >= v.opens;
   const dotRight = p.nowX < box.w - 90;
-  // At the right end the value would sit on PACE NEEDED and TARGET; there it goes under the point.
   const paceLabelY = Math.min(box.h - 6, (box.h * 88) / box.w + 16);
-  const valueY = !dotRight && now < v.closes && p.nowY - 8 < paceLabelY + 16 ? p.nowY + 20 : p.nowY - 8;
+  const valueY = valueLabelY({ dotRight, open: now < v.closes, nowY: p.nowY, paceLabelY });
 
   return (
     <figure className={`chart${live ? " live-total" : ""}`} style={{ margin: 0 }}>
@@ -97,7 +96,7 @@ export function Chart({ campaign, ledger, now, raised, backers, live }: { campai
               </text>
             ) : null}
             <line className="c-target" x1={0} x2={box.w} y1={p.targetY} y2={p.targetY} />
-            <text className="c-label" x={box.w} y={-8} textAnchor="end">
+            <text className="c-label" x={box.w} y={TARGET_LABEL_Y} textAnchor="end">
               Target {formatUsd(v.target)}
             </text>
             {taking ? <line className="c-now" x1={p.nowX} x2={p.nowX} y1={p.band && p.band.w > 70 ? 24 : 0} y2={box.h} /> : null}

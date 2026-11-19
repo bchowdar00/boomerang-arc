@@ -56,14 +56,15 @@ h1, h2, h3, h4, p { margin: 0; }
 /* The bar: quiet, so a page's own headline is the first thing read. */
 nav.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; backdrop-filter: saturate(1.2) blur(10px); background: color-mix(in srgb, var(--paper) 82%, transparent); border-bottom: 1px solid transparent; transition: border-color 300ms var(--ease); }
 nav.top.scrolled { border-bottom-color: var(--rule); }
-nav.top .wrap { display: flex; align-items: center; gap: 30px; min-height: 64px; }
+/* Nothing in the bar breaks inside itself; when it runs out of room the wallet drops to a row of its own. */
+nav.top .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 30px; min-height: 64px; }
 .mark { display: flex; align-items: center; gap: 10px; font-family: var(--display); font-variation-settings: "opsz" 72, "SOFT" 0; font-weight: 700; font-size: 1.32rem; letter-spacing: -0.01em; text-decoration: none; }
 .mark svg { width: 26px; height: 26px; }
-.links { display: flex; gap: 24px; font-size: 0.95rem; }
+.links { display: flex; gap: 24px; font-size: 0.95rem; white-space: nowrap; }
 .links a { text-decoration: none; color: var(--ink-soft); padding-block: 6px; transition: color 200ms var(--ease); }
 .links a:hover, .links a[aria-current="page"] { color: var(--ink); }
 .links a[aria-current="page"] { box-shadow: 0 1.5px 0 var(--ink); }
-.wallet { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.wallet { margin-left: auto; display: flex; align-items: center; gap: 12px; white-space: nowrap; }
 .wallet-account { font-family: var(--code); font-size: 0.84rem; color: var(--ink-2); padding: 6px 11px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--rule); background: color-mix(in srgb, var(--sheet) 80%, transparent); }
 
 /* Notices under the bar: a missing wallet, a wallet error, a chain that cannot be read. */
@@ -93,14 +94,16 @@ footer.foot .fl { display: flex; flex-wrap: wrap; gap: 6px 20px; align-content: 
 .stopped { max-width: 60ch; margin: 0 auto; padding: clamp(48px, 12vh, 140px) var(--gutter); display: grid; gap: 14px; }
 .stopped h1 { font-family: var(--display); font-weight: 600; font-size: clamp(2rem, 1.3rem + 2.6vw, 3.2rem); letter-spacing: -0.03em; line-height: 1.02; }
 
-/* On a phone the bar wraps to three rows, a fifth of the screen: it stays at the top of the page and does not follow. */
-@media (max-width: 600px) {
-  nav.top { position: static; backdrop-filter: none; background: var(--paper); }
-}
+/* Under 900px the bar is two or three rows: it stays at the top of the page and does not follow the scroll. */
 @media (max-width: 900px) {
-  nav.top .wrap { flex-wrap: wrap; gap: 6px 18px; padding-block: 10px; }
+  nav.top { position: static; backdrop-filter: none; background: var(--paper); }
+  nav.top .wrap { gap: 6px 18px; padding-block: 10px; }
   .links { order: 3; width: 100%; gap: 20px; overflow-x: auto; }
   footer.foot .wrap { grid-template-columns: 1fr; }
+}
+/* A phone is narrower than the wallet's two parts side by side: there they may break. */
+@media (max-width: 600px) {
+  .wallet { white-space: normal; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 1ms !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
