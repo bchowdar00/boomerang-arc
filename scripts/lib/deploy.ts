@@ -1,6 +1,6 @@
 // Deploy Boomerang, its PledgeRouter and SignedPledge (the one-signature pledge helper), read them back to prove they went up as
 // meant, then record the result: the kit's addresses.json gets the new addresses, the deploy
-// block and the hash of the transaction that created Boomerang, and the Stream filter gets a copy with its placeholder address replaced by Boomerang's.
+// block and the hash of the transaction that created Boomerang.
 //
 // No key and no network choice live here. The caller hands in the Hardhat viem helpers already
 // bound to a network (the in-memory chain in tests, Arc through scripts/deploy.ts in anger).
@@ -40,8 +40,6 @@ export async function deployAll(o: {
   transmitter: Address;
   messenger: Address;
   addressesPath: string;
-  filterSource: string;
-  filterOut: string;
   log?: (line: string) => void;
 }): Promise<DeployOutput> {
   const { viem, chainId, usdc, transmitter, messenger } = o;
@@ -86,18 +84,6 @@ export async function deployAll(o: {
   const hBoomerang = await helper.read.boomerang();
   if (!sameAddress(hBoomerang, boomerang.address)) throw new Error(`SignedPledge.boomerang is ${hBoomerang}, expected ${boomerang.address}`);
 
-  // Validate and build the deployable filter BEFORE writing anything, so a bad filter source
-  // leaves the addresses file untouched. Only the line that defines BOOMERANG is rewritten,
-  // and there must be exactly one such line; other zero-address literals are left alone.
-  const filterSrcText = await readFile(o.filterSource, "utf8");
-  const placeholderLine = /^(.*const BOOMERANG = ")0x0{40}(";.*)$/gm;
-  const hits = filterSrcText.match(placeholderLine) ?? [];
-  if (hits.length !== 1) {
-    throw new Error(`filter: expected exactly one BOOMERANG placeholder line, found ${hits.length}`);
-  }
-  const lower = boomerang.address.toLowerCase();
-  const filterText = filterSrcText.replace(placeholderLine, `$1${lower}$2`);
-
   // Update addresses.json: overwrite this chain's six addresses and deployBlock, keep every
   // other key and chain, two-space indent and a trailing newline, written atomically.
   const parsed = JSON.parse(await readFile(o.addressesPath, "utf8")) as Record<string, Record<string, unknown>>;
@@ -113,9 +99,6 @@ export async function deployAll(o: {
     deployBlock: deployBlock.toString(),
     boomerangTx: deploymentTransaction.hash,
   };
-  // The filter is written first. If the second write fails, addresses.json still says "not
-  // deployed", so a re-run is not refused and writes both again.
-  await writeFileAtomic(o.filterOut, filterText);
   await writeFileAtomic(o.addressesPath, JSON.stringify(parsed, null, 2) + "\n");
 
   log(`chainId        ${chainId}`);
@@ -132,7 +115,6 @@ export async function deployAll(o: {
   log(`router code    ${routerCodeHash}`);
   log(`helper code    ${signedPledgeCodeHash}`);
   log(`addresses      ${o.addressesPath}`);
-  log(`filter         ${o.filterOut}`);
 
   return {
     chainId,

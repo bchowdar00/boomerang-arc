@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { createFollower, nodeFrom, type Node } from "../src/follow.ts";
-import { createKeeper, type Delivery, type Health, type Keeper } from "../src/keeper.ts";
-import { memoryStore } from "../src/store.ts";
+import { type Delivery, type Health, type Keeper } from "../src/keeper.ts";
 import type { Address, RawLog } from "../../../packages/kit/src/index.ts";
 
 const BOOMERANG = "0xB00000000000000000000000000000000000000B" as Address;
@@ -18,11 +17,6 @@ const health: Health = {
   repeats: 0,
   lastBlock: 0,
   lastTime: "0",
-  lastDeliveryAt: null,
-  lastBeatBlock: null,
-  streamBlock: null,
-  kvError: null,
-  deliveries: 0,
   sent: 0,
   failedSends: 0,
   rejected: 0,
@@ -47,14 +41,14 @@ function rig(o: { startBlock?: bigint; span?: bigint } = {}) {
     storeFails: false,
     headWait: null as Promise<void> | null,
   };
-  const taken: { d: Delivery; from: string }[] = [];
+  const taken: { d: Delivery }[] = [];
   const asked: [bigint, bigint][] = [];
   let heads = 0;
   const keeper: Pick<Keeper, "deliver" | "health"> = {
     health: () => ({ ...s.h }),
-    deliver(d, from = "stream") {
+    deliver(d) {
       if (s.storeFails) throw new Error("the store cannot be written");
-      taken.push({ d, from });
+      taken.push({ d });
       if (d.toBlock > s.h.lastBlock) s.h.lastBlock = d.toBlock;
       return { applied: d.logs.length, repeats: 0, done: Promise.resolve([]) };
     },
@@ -72,22 +66,33 @@ function rig(o: { startBlock?: bigint; span?: bigint } = {}) {
       return s.logBlocks.filter((b) => BigInt(b) >= from && BigInt(b) <= to).map(log);
     },
   };
-  const lines: string[] = [];
   const follower = createFollower({
     keeper,
     node,
     startBlock: o.startBlock ?? 0n,
-    quietMs: 300_000,
     healAfterMs: 60_000,
     span: o.span ?? 5_000n,
     clock: () => s.now,
-    log: (line) => lines.push(line),
   });
-  return { s, taken, asked, follower, lines, heads: () => heads };
+  return { s, taken, asked, follower, heads: () => heads };
 }
 
-describe("the follower: the keeper's own reading of the node when the Stream is silent", () => {
-  it("follow.quiet: with no Stream delivery since the keeper started, it reads from the block after the last one heard and hands over one delivery", async () => {
+describe("the follower: the keeper's reading of the node", () => {
+  it("follow.first: a new follower reads on its very first tick, from the block after the last one the keeper's store heard", async () => {
+    const r = rig();
+    r.s.h.lastBlock = 90;
+    await r.follower.tick();
+    assert.deepEqual(r.asked, [[91n, 100n]]);
+    assert.equal(r.taken.length, 1);
+    assert.equal(r.taken[0].d.fromBlock, 91);
+  });
+
+  it("follow.stateShape: state() has exactly the keys reads, lastReadAt, readTo, faults", async () => {
+    const r = rig();
+    assert.deepEqual(Object.keys(r.follower.state()).sort(), ["faults", "lastReadAt", "readTo", "reads"]);
+  });
+
+  it("follow.reads: it reads from the block after the last one heard and hands over one delivery of just that run's logs", async () => {
     const r = rig();
     r.s.h.lastBlock = 90;
     r.s.logBlocks = [85, 93, 97, 104];
@@ -95,29 +100,8 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
 
     assert.deepEqual(r.asked, [[91n, 100n]]);
     assert.equal(r.taken.length, 1);
-    assert.equal(r.taken[0].from, "node");
-    assert.deepEqual(r.taken[0].d, { v: 1, fromBlock: 91, toBlock: 100, time: 5000, logs: [log(93), log(97)], opened: [], due: [], beat: true });
-    assert.deepEqual(r.follower.state(), { following: true, reads: 1, lastReadAt: 10_000_000, readTo: 100, faults: 0 });
-  });
-
-  it("follow.streamFeeding: while the Stream delivers, the node is not asked anything", async () => {
-    const r = rig();
-    r.s.h.lastDeliveryAt = r.s.now - 299_999;
-    r.s.h.lastBlock = 90;
-    await r.follower.tick();
-    assert.equal(r.heads(), 0);
-    assert.deepEqual(r.asked, []);
-    assert.deepEqual(r.taken, []);
-    assert.deepEqual(r.follower.state(), { following: false, reads: 0, lastReadAt: null, readTo: null, faults: 0 });
-  });
-
-  it("follow.silent: a Stream silent for the whole wait is read around", async () => {
-    const r = rig();
-    r.s.h.lastDeliveryAt = r.s.now - 300_000;
-    r.s.h.lastBlock = 90;
-    await r.follower.tick();
-    assert.deepEqual(r.asked, [[91n, 100n]]);
-    assert.equal(r.follower.state().following, true);
+    assert.deepEqual(r.taken[0].d, { fromBlock: 91, toBlock: 100, time: 5000, logs: [log(93), log(97)] });
+    assert.deepEqual(r.follower.state(), { reads: 1, lastReadAt: 10_000_000, readTo: 100, faults: 0 });
   });
 
   it("follow.keepsPlace: the next read starts where the last one ended; with no new block it still hands the keeper the time", async () => {
@@ -134,7 +118,7 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
     await r.follower.tick();
     assert.equal(r.asked.length, 2);
     assert.equal(r.taken.length, 3);
-    assert.deepEqual(r.taken[2].d, { v: 1, fromBlock: 110, toBlock: 110, time: 5005, logs: [], opened: [], due: [], beat: true });
+    assert.deepEqual(r.taken[2].d, { fromBlock: 110, toBlock: 110, time: 5005, logs: [] });
     assert.equal(r.follower.state().reads, 3);
 
     // A node behind the keeper: the place is kept, nothing goes backwards.
@@ -157,18 +141,18 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
     ]);
     assert.equal(r.taken.length, 1);
     // Part of a catch-up: it carries the time of the newest log in it, never the newest block's.
-    assert.deepEqual(r.taken[0].d, { v: 1, fromBlock: 1_000, toBlock: 10_999, time: 7_000, logs: [log(1_000), log(5_999), log(6_000)], opened: [], due: [], beat: true });
+    assert.deepEqual(r.taken[0].d, { fromBlock: 1_000, toBlock: 10_999, time: 7_000, logs: [log(1_000), log(5_999), log(6_000)] });
     assert.equal(r.follower.state().readTo, 10_999);
 
     await r.follower.tick();
     assert.deepEqual(r.asked.slice(2), [[11_000n, 12_500n]]);
-    assert.deepEqual(r.taken[1].d, { v: 1, fromBlock: 11_000, toBlock: 12_500, time: 9_000, logs: [log(12_500)], opened: [], due: [], beat: true });
+    assert.deepEqual(r.taken[1].d, { fromBlock: 11_000, toBlock: 12_500, time: 9_000, logs: [log(12_500)] });
 
     // A part with no log in it moves the block and leaves the clock alone.
     const quietPart = rig({ span: 10n });
     quietPart.s.h.lastBlock = 50;
     await quietPart.follower.tick();
-    assert.deepEqual(quietPart.taken[0].d, { v: 1, fromBlock: 51, toBlock: 70, time: 0, logs: [], opened: [], due: [], beat: true });
+    assert.deepEqual(quietPart.taken[0].d, { fromBlock: 51, toBlock: 70, time: 0, logs: [] });
   });
 
   it("follow.spanLimit: a read never asks for more blocks in one call than the span", async () => {
@@ -191,13 +175,13 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
     await r.follower.tick();
     assert.deepEqual(r.asked, [[71n, 80n], [81n, 90n]]);
     assert.equal(r.taken.length, 0);
-    assert.deepEqual(r.follower.state(), { following: true, reads: 0, lastReadAt: null, readTo: null, faults: 1 });
+    assert.deepEqual(r.follower.state(), { reads: 0, lastReadAt: null, readTo: null, faults: 1 });
 
     r.s.headFails = true;
     await r.follower.tick();
     assert.equal(r.follower.state().faults, 2);
     assert.equal(r.taken.length, 0);
-    assert.ok(!JSON.stringify([r.follower.state(), r.lines]).includes("SECRET"), "a node's words are never kept");
+    assert.ok(!JSON.stringify(r.follower.state()).includes("SECRET"), "a node's words are never kept");
 
     // The next tick starts again from the same place and gets through; the one after finishes.
     r.s.headFails = false;
@@ -224,71 +208,26 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
     assert.equal(r.taken.length, 1);
   });
 
-  it("follow.handsBack: when the Stream delivers again the node is read once more up to the newest block, then left alone", async () => {
-    const r = rig();
-    r.s.h.lastBlock = 90;
-    r.s.logBlocks = [120];
-    await r.follower.tick(); // place: 101
-
-    // The Stream comes back at the tip: its first delivery covers block 130 only.
-    r.s.h.lastDeliveryAt = r.s.now;
-    r.s.h.lastBlock = 130;
-    r.s.head = { number: 131n, time: 5_020n };
-    await r.follower.tick();
-    assert.deepEqual(r.asked[1], [101n, 131n]);
-    assert.deepEqual(r.taken[1].d.logs, [log(120)]);
-    assert.equal(r.follower.state().following, false);
-
-    await r.follower.tick();
-    assert.equal(r.asked.length, 2);
-    assert.equal(r.taken.length, 2);
-  });
-
-  it("follow.handsBack.behind: a Stream that comes back ahead of the node is not left a gap: the node is read until it has passed the Stream's block", async () => {
-    const r = rig();
-    r.s.h.lastBlock = 90;
-    await r.follower.tick(); // place: 101
-    r.s.h.lastDeliveryAt = r.s.now;
-    r.s.h.lastBlock = 140;
-    r.s.h.streamBlock = 140;
-    r.s.head = { number: 131n, time: 5_020n }; // this node has not seen block 140 yet
-    r.s.logBlocks = [135];
-    await r.follower.tick();
-    assert.deepEqual(r.asked[1], [101n, 131n]);
-    assert.equal(r.follower.state().following, false);
-
-    r.s.head = { number: 141n, time: 5_025n };
-    await r.follower.tick();
-    assert.deepEqual(r.asked[2], [132n, 141n]);
-    assert.deepEqual(r.taken[2].d.logs, [log(135)]);
-
-    await r.follower.tick();
-    assert.equal(r.asked.length, 3);
-  });
-
   it("follow.heals: an event number missing for a minute is looked for from the contract's first block, once for that gap", async () => {
+    // The node sits at its head and the keeper has heard it, so the reading of new blocks asks the
+    // node nothing each tick; `asked` then holds only the reads made for the hole.
     const r = rig({ startBlock: 40n });
-    r.s.h.lastDeliveryAt = r.s.now; // the Stream is feeding
-    r.s.h.lastBlock = 99;
+    r.s.h.lastBlock = 100;
+    r.s.head = { number: 100n, time: 5_000n };
     r.s.h.missing = { from: "7", to: "9" };
     await r.follower.tick();
-    assert.deepEqual(r.asked, [], "a gap just seen may only be deliveries out of order");
+    assert.deepEqual(r.asked, [], "a gap just seen may only be events still arriving out of order");
 
     r.s.now += 59_999;
-    r.s.h.lastDeliveryAt = r.s.now;
     await r.follower.tick();
     assert.deepEqual(r.asked, []);
 
     r.s.now += 1;
-    r.s.h.lastDeliveryAt = r.s.now;
     await r.follower.tick();
     assert.deepEqual(r.asked, [[40n, 100n]]);
-    assert.equal(r.taken.length, 1);
-    assert.equal(r.follower.state().following, false);
 
     // The same gap is not read for again.
     r.s.now += 120_000;
-    r.s.h.lastDeliveryAt = r.s.now;
     await r.follower.tick();
     assert.equal(r.asked.length, 1);
 
@@ -296,7 +235,6 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
     r.s.h.missing = { from: "12", to: "12" };
     await r.follower.tick();
     r.s.now += 60_000;
-    r.s.h.lastDeliveryAt = r.s.now;
     await r.follower.tick();
     assert.deepEqual(r.asked[1], [40n, 100n]);
 
@@ -306,12 +244,11 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
     r.s.h.missing = { from: "12", to: "12" };
     await r.follower.tick();
     r.s.now += 60_000;
-    r.s.h.lastDeliveryAt = r.s.now;
     await r.follower.tick();
     assert.equal(r.asked.length, 3);
   });
 
-  it("follow.heals.quiet: with the Stream silent too, the read for a gap starts from the contract's first block and the place moves on from the newest", async () => {
+  it("follow.heals.quiet: the read for a gap starts from the contract's first block and the place moves on from the newest", async () => {
     const r = rig({ startBlock: 40n });
     r.s.h.lastBlock = 90;
     r.s.h.missing = { from: "3", to: "3" };
@@ -367,13 +304,12 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
 
   it("follow.heals.moves: a hole that the read itself is filling keeps the read's place; it does not start again each time the hole's first number moves", async () => {
     const r = rig({ startBlock: 40n, span: 30n });
-    r.s.h.lastDeliveryAt = r.s.now; // the Stream is feeding: only the hole is read
+    // The node sits at its head and the keeper has heard it, so only the hole is read.
     r.s.h.lastBlock = 130;
     r.s.head = { number: 130n, time: 5_000n };
     r.s.h.missing = { from: "5", to: "9" };
     await r.follower.tick();
     r.s.now += 60_000;
-    r.s.h.lastDeliveryAt = r.s.now;
     await r.follower.tick(); // [40,69]
     // That part held event 5: the hole now starts at 6.
     r.s.h.missing = { from: "6", to: "9" };
@@ -390,18 +326,16 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
     // The read is done and the hole is still there (this node did not have those events).
     // It is not read for again at once, but it is not given up for good: after 64 times the wait.
     r.s.now += 64 * 60_000 - 1;
-    r.s.h.lastDeliveryAt = r.s.now;
     await r.follower.tick();
     assert.equal(r.asked.length, 4);
     r.s.now += 1;
-    r.s.h.lastDeliveryAt = r.s.now;
     await r.follower.tick();
     assert.deepEqual(r.asked[4], [40n, 69n]);
   });
 
-  it("follow.noReread: a node behind the keeper's last block is not asked again for blocks the Stream already delivered", async () => {
+  it("follow.noReread: a node behind the keeper's last block is not asked again for blocks the keeper has already heard", async () => {
     const r = rig();
-    r.s.h.lastBlock = 120; // heard from the Stream, which has now gone silent
+    r.s.h.lastBlock = 120; // heard already; this node is behind
     r.s.head = { number: 100n, time: 5_000n }; // this node is behind
     await r.follower.tick();
     assert.deepEqual(r.asked, []);
@@ -425,43 +359,6 @@ describe("the follower: the keeper's own reading of the node when the Stream is 
     release();
     await first;
     assert.equal(r.taken.length, 1);
-  });
-
-  it("follow.says: it says once when the Stream falls silent and once when it delivers again, and names no block it has not worked out", async () => {
-    const r = rig();
-    r.s.h.lastBlock = 90;
-    await r.follower.tick();
-    await r.follower.tick();
-    assert.deepEqual(r.lines, ["the Stream is silent: reading the node"]);
-    r.s.h.lastDeliveryAt = r.s.now;
-    await r.follower.tick();
-    await r.follower.tick();
-    assert.deepEqual(r.lines, ["the Stream is silent: reading the node", "the Stream is delivering again: handing back to it"]);
-  });
-});
-
-describe("the keeper's two sources", () => {
-  it("keeper.sources: what the keeper read from the node moves its block and clock, and is never counted as the Stream's", async () => {
-    const keeper = createKeeper({ boomerang: BOOMERANG, store: memoryStore(), send: async () => ({ ok: false, error: "no signer" }), clock: () => 777 });
-    const bare = (block: number, time: number): Delivery => ({ v: 1, fromBlock: block, toBlock: block, time, logs: [], opened: [], due: [], beat: true, kvError: "a fault only the Stream's store can have" });
-
-    await keeper.deliver(bare(50, 9_000), "node").done;
-    let h = keeper.health();
-    assert.deepEqual([h.lastBlock, h.lastTime], [50, "9000"]);
-    assert.deepEqual([h.deliveries, h.lastDeliveryAt, h.lastBeatBlock, h.streamBlock, h.kvError], [0, null, null, null, null]);
-
-    // The Stream's own delivery, older by block: counted as the Stream's, and the newest block heard stays.
-    const fromStream = bare(40, 8_900);
-    delete fromStream.kvError;
-    await keeper.deliver(fromStream).done;
-    h = keeper.health();
-    assert.deepEqual([h.lastBlock, h.lastTime], [50, "9000"]);
-    assert.deepEqual([h.deliveries, h.lastDeliveryAt, h.streamBlock], [1, 777, 40]);
-
-    await keeper.deliver(bare(60, 9_010), "stream").done;
-    await keeper.deliver(bare(70, 9_020), "node").done;
-    h = keeper.health();
-    assert.deepEqual([h.lastBlock, h.lastTime, h.deliveries, h.streamBlock, h.lastBeatBlock], [70, "9020", 2, 60, 60]);
   });
 });
 

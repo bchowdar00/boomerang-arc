@@ -1,6 +1,6 @@
 # The keeper as one container. Build from the repository root, so the kit comes in:
 #   docker build -f services/keeper/Dockerfile -t boomerang-keeper .
-# No key or token is built in: KEEPER_PRIVATE_KEY, STREAM_SECURITY_TOKEN and DEMO_RECIPIENT are set
+# No key is built in: KEEPER_PRIVATE_KEY and DEMO_RECIPIENT are set
 # on the host as secrets. The event file and the desk's notes live in /data, which must be storage
 # that outlives the container: without it a restart forgets which addresses the desk already paid.
 FROM node:26.13.1-slim

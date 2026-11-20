@@ -6,9 +6,9 @@ A sponsor locks two pots before a campaign opens: a **match**, paid to the recip
 
 It is built for a campus club or a community with a sponsor behind it: the sponsor's money does two jobs, and only one of them is ever paid.
 
-**Status:** live on Arc Testnet (UBC 2026 hackathon week). The contracts were deployed on 2026-11-17 UTC (block 72640266), their sources are verified on Arc's explorer, and they pass all six live checks (`npm run verify`). The page is at https://boomerang-arc.vercel.app and the keeper runs on Azure. A QuickNode Stream fed the keeper from 2026-11-17 until 2026-11-18 19:18 UTC, when it stopped (see "QuickNode Streams" below); since then the keeper reads Arc's node itself (it does so whenever the Stream is silent), and the Proof page says what is feeding the keeper now. Ten campaigns have run on Arc, with twelve one-signature pledges relayed by the keeper. The last five were two-minute campaigns opened from the page's desk and settled by the keeper from Arc's node, and the last four pledges were signed by the page's practice wallet.
-**Last reconciled:** 2026-11-19.
-**Known gaps:** the practice wallet has pledged four times on Arc (campaigns 7, 8, 9 and 10, 2026-11-19; the fourth from a newly made one); each new one takes 2.00 of the desk's test USDC, with no daily cap; the checks on Proof take about four seconds on Arc (timed twice on 2026-11-19, in one browser) and longer as the chain grows; how common wallets show the signed pledge's typed data is not checked (the pledges on Arc were signed by scripts, and four by the page's practice wallet); the cross-chain router is deployed but has only run against a stand-in for Circle's contracts written from Circle's published source, and the page has no form for a pledge from another chain; the page opens campaigns only through its desk, on fixed two-minute or ten-minute terms; no real campaign has run, and all money is test USDC.
+**Status:** live on Arc Testnet (UBC 2026 hackathon week). The contracts were deployed on 2026-11-17 UTC (block 72640266), their sources are verified on Arc's explorer, and they pass all six live checks (`npm run verify`). The page is at https://boomerang-arc.vercel.app and the keeper runs on Azure, reading Arc's node itself. Eleven campaigns have run on Arc, with thirteen one-signature pledges relayed by the keeper. The last six were two-minute campaigns opened from the page's desk and settled by the keeper, and the last five pledges were signed by the page's practice wallet.
+**Last reconciled:** 2026-11-20.
+**Known gaps:** the practice wallet has pledged five times on Arc (campaigns 7 to 11, 2026-11-19; the fourth and fifth from newly made ones); each new one takes 2.00 of the desk's test USDC, with no daily cap; the checks on Proof take four to five seconds on Arc (timed three times on 2026-11-19, in one browser) and longer as the chain grows; how common wallets show the signed pledge's typed data is not checked (the pledges on Arc were signed by scripts, and five by the page's practice wallet); the cross-chain router is deployed but has only run against a stand-in for Circle's contracts written from Circle's published source, and the page has no form for a pledge from another chain (`scripts/cross-chain-pledge.mjs` makes one from Base Sepolia or Sepolia with the page's own flow code; it has been run only as a dry look, never with `--send`); the page opens campaigns only through its desk, on fixed two-minute or ten-minute terms; no real campaign has run, and all money is test USDC.
 
 ## Where this came from
 
@@ -35,11 +35,10 @@ The full rules, what each side can lose, the ways to game it and the risk assump
 | The contract | `contracts/contracts/Boomerang.sol` | Every campaign rule and all the money. No owner, no upgrade, no pause, no sweep. |
 | The cross-chain router | `contracts/contracts/PledgeRouter.sol` | Turns a CCTP mint arriving on Arc into a pledge in one transaction; whatever the campaign does not take goes to the backer's address on Arc. |
 | The one-signature pledge | `contracts/contracts/SignedPledge.sol` | A backer signs Circle's USDC transfer authorization once (no transaction, no gas); the keeper submits it, and the helper pledges it in the backer's name. The signature names one campaign, one amount and a three-minute window. If the keeper is down or refuses, the page offers the ordinary two-step pledge. |
-| The Stream filter | `streams/filter.js` | A QuickNode Streams filter that passes on Boomerang's events and says when a campaign's deadline has passed. |
-| The keeper | `services/keeper/` | Receives the Stream's webhook (and reads the node itself when the Stream is silent), rebuilds a ledger from the events alone, and makes the calls that settle a campaign. It has no rights in the contract. |
+| The keeper | `services/keeper/` | Reads Arc's node every five seconds, rebuilds a ledger from the events alone, and makes the calls that settle a campaign. It has no rights in the contract. |
 | The kit | `packages/kit/` | The contract's arithmetic in TypeScript, event decoding and the event-built ledger, each tested equal to the contract. |
 | The page | `web/` | Reads the contract from the browser. The pledge form is a cheque: "Pay to the order of" the campaign, "the sum of" what is typed, and beside the button what comes back if the target is missed, in the contract's own figure, before anyone pays. The landing page shows the two endings as a boomerang's flight, plays one campaign through, and lists every campaign on the contract with its outcome, Cleared or Returned. A campaign's own page has what is left to raise, the time left, the early-bonus clock and a chart of the climb. A campaign's page also lists its backers: the addresses from the keeper's ledger, every figure beside them from the contract. My money shows the connected account's pledges, looks up any address (and lets anyone send that backer's refund, which can only pay the backer), and shows a real backer as an example when nobody is connected. A visitor with no wallet can try a pledge with a practice wallet: a key the page makes and keeps in that browser, for test money only, funded by the site's desk. Proof sets the keeper's event-built ledger against the contract at one block, lists every campaign with how it ended, and runs five of the six live checks in the visitor's own browser at the press of a button. Plain files once built; no server of its own. The design as built: [web/DESIGN.md](web/DESIGN.md). |
-| Scripts | `scripts/` | Deploy, demo campaigns, a keyless check of a live deployment, and the whole app on one machine. |
+| Scripts | `scripts/` | Deploy, demo campaigns, a keyless check of a live deployment, a cross-chain pledge from a test wallet, and the whole app on one machine. |
 
 How the parts fit, and what still works when each one stops: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
@@ -61,26 +60,17 @@ How the parts fit, and what still works when each one stops: **[docs/ARCHITECTUR
 | CCTP MessageTransmitterV2 (Circle) | `0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275` |
 | CCTP TokenMessengerV2 (Circle) | `0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA` |
 
-## QuickNode Streams
+## How settlement happens on time
 
-The contract does nothing by itself at a deadline: someone has to call `finalize` and the payouts. A QuickNode Stream is what makes that happen on time. It is the keeper's first source: while it delivers, the keeper polls nothing, and the Stream is the only clock it has and the only thing that tells it something happened. (Before it sends a call, the keeper asks the contract whether that call would change anything, so a false delivery costs no gas.)
+The contract does nothing by itself at a deadline: someone has to call `finalize` and the payouts. The keeper is what makes that happen on time, and it needs nothing but a node.
 
-| | |
-|---|---|
-| Network | Arc Testnet |
-| Dataset | `block_with_receipts` (each block's time and its event logs in one payload) |
-| Filter | [`streams/filter.js`](streams/filter.js), JavaScript, using the Key-Value Store |
-| Destination | a webhook, `POST /stream` on the keeper, verified by the Stream's HMAC signature |
+**What it reads.** Every five seconds the keeper asks Arc's node for the newest block and for the contract's logs since the last block it heard ([`services/keeper/src/follow.ts`](services/keeper/src/follow.ts)). It reads in small steps when it is a long way behind, since a public node refuses a burst, and it re-reads from the contract's first block when an event number has been missing from its ledger for a minute.
 
-**Filter logic.** For each block the filter (1) passes on every event log from the Boomerang contract, with the block's number and time; (2) keeps each open campaign's opening time and deadline in the Key-Value Store, learned from the contract's own `CampaignCreated` and `Finalized` events; (3) says `opened` once when a campaign opens and `due` from its deadline until its `Finalized` event is seen; (4) sends a bare heartbeat every 300th block; (5) delivers nothing otherwise.
+**What it does with it.** It rebuilds each campaign's totals from the events alone, in sequence-number order, and on every read works out from that ledger which calls would move a campaign forward. Before it sends a call it asks the contract whether that call would change anything, so a wrong reading costs no gas.
 
-**What the keeper does with it.** It rebuilds each campaign's totals from the events alone, in sequence-number order, and on every delivery works out from that ledger which calls would move a campaign forward. Those calls are open to anyone, so if the keeper is off, payouts are only later, never lost.
+**If it is off.** Those calls are open to anyone, so payouts are only later, never lost. The page offers them to any visitor.
 
-**When the Stream is silent.** After five minutes with no delivery (two of the Stream's heartbeats) the keeper reads the node itself: every five seconds it asks for the newest block and for the contract's logs since the last block it heard (in small steps when it is a long way behind, since a public node refuses a burst), and takes them down the same path as a delivery ([`services/keeper/src/follow.ts`](services/keeper/src/follow.ts)). When the Stream delivers again the keeper reads the node once more, so no block falls between the two, and then leaves it alone. It also re-reads from the contract's first block when an event number has been missing from its ledger for a minute. `/health` and the Proof page count the Stream's deliveries and the node's reads apart.
-
-**The Stream on Arc.** It ran from block 72640266 (2026-11-17) to block 72897900 (2026-11-18 19:18 UTC): 257,634 blocks, and 935 deliveries taken by the keeper since it was started. Then it stopped. QuickNode's pricing page lists 10 million API credits for the free trial, and its calculator charges 40 credits a block for this dataset on Arc Testnet (both read 2026-11-18); 257,634 blocks at 40 is 10.3 million, so by those figures the trial was used up. The account's own usage page was not read. The Stream is left paused, and the keeper's reading of the node is what settles campaigns meanwhile.
-
-Details, the behaviour when the Key-Value Store fails, and cost: **[docs/STREAM.md](docs/STREAM.md)**.
+**On Arc.** The six campaigns that have come due since 2026-11-18 20:53 UTC (campaigns 6 to 11) were finalized and paid by the keeper with nobody pressing anything. In the most recent (campaign 11, 2026-11-19) the campaign was finalized one second after its deadline and the backer's refund and bonus landed 14 seconds after it.
 
 ## Run it
 
@@ -94,11 +84,11 @@ npm install
 npm test
 ```
 
-`npm test` runs the contract tests on Hardhat's in-memory chain (the rules with worked numbers, the attack table, a random walk that checks custody after every action, the router, the kit against the contract, the keeper against the contract, the scripts, the app's reading of the keeper's ledger), then the keeper's own tests, the Stream filter's and the app's.
+`npm test` runs the contract tests on Hardhat's in-memory chain (the rules with worked numbers, the attack table, a random walk that checks custody after every action, the router, the kit against the contract, the keeper against the contract, the scripts, the app's reading of the keeper's ledger), then the keeper's own tests and the app's.
 
-One of those tests runs the whole pipeline with nothing built by hand in between (`contracts/test/pipeline.test.ts`): the contract's receipts, as the node's JSON-RPC gives them, go through `streams/filter.js`; each thing the filter returns is signed and posted to the keeper's HTTP server; the keeper calls the contract. The only stand-in is for QuickNode itself, the thing that runs the filter once per block. Another runs the keeper with no Stream at all (`contracts/test/follow.test.ts`): it reads the node's own JSON-RPC and settles a funded, a void and a missed campaign, takes over from a Stream that goes silent, and fills a hole a lost delivery left.
+One of those tests runs the keeper against a real node with nothing built by hand in between (`contracts/test/follow.test.ts`): it reads the node's own JSON-RPC, settles a funded, a void and a missed campaign, and fills a hole in its ledger from the node.
 
-The whole app on one machine, with nothing deployed and no wallet extension (a local node, the contracts, three example campaigns, the keeper with its desk, a local stand-in for the Stream, and the page at `http://127.0.0.1:5173/`):
+The whole app on one machine, with nothing deployed and no wallet extension (a local node, the contracts, three example campaigns, the keeper with its desk, and the page at `http://127.0.0.1:5173/`):
 
 ```bash
 cd contracts && npx hardhat build

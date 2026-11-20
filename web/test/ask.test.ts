@@ -8,8 +8,8 @@ import { givenStore } from "../src/flows/given.ts";
 const ME = "0x00000000000000000000000000000000000000a1";
 const URL_ = "https://keeper.example";
 const HEALTH = {
-  lastSeq: "0", missing: null, pending: 0, repeats: 0, lastBlock: 0, lastTime: "0", lastDeliveryAt: null, lastBeatBlock: null,
-  kvError: null, deliveries: 0, sent: 0, failedSends: 0, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
+  lastSeq: "0", missing: null, pending: 0, repeats: 0, lastBlock: 0, lastTime: "0",
+  sent: 0, failedSends: 0, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
 };
 const LEDGER = { lastSeq: "0", totalOwed: "0", missing: null, campaigns: [], feed: [] };
 

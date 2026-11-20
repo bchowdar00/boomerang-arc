@@ -1,17 +1,16 @@
 // The whole app on one machine, for development and for looking at the page before anything is
 // deployed. Nothing here touches Arc or any other network: it starts a local node, puts the test
 // token and the contracts on it, makes example campaigns, and runs the keeper (with its demo
-// desk), the local stand-in for the Stream, and the page's dev server.
+// desk, reading the local node as it reads Arc's) and the page's dev server.
 //
 //   node scripts/dev-local.mjs
 //
 // Stop it with Ctrl-C; everything it started stops with it. The keeper's files go in a temporary
-// folder. The keeper's key and the Stream token are made here for this run, live only in the
-// children's environment, and are never printed or written.
+// folder. The keeper's key is made here for this run, lives only in the keeper's environment,
+// and is never printed or written.
 //
 // Every address it uses is 127.0.0.1. It takes no settings that could point it elsewhere.
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -139,8 +138,7 @@ async function main() {
   const made = await makeDemoCampaigns({ publicClient, sponsor, boomerang, usdc, recipient, which: ["funded", "missed", "live"], wait, liveOpenFor: 3600n, fundGas, log: (line) => console.log(`[examples] ${line}`) });
   await publicClient.request({ method: "evm_setIntervalMining", params: [1000] });
 
-  // 5. The keeper, with a signer and the demo desk, and the Stream's local stand-in.
-  const token = randomBytes(24).toString("hex");
+  // 5. The keeper, with a signer and the demo desk. It reads this node itself every five seconds.
   start("keeper", "node", ["services/keeper/src/main.ts"], {
     cwd: root,
     env: {
@@ -149,20 +147,14 @@ async function main() {
       BOOMERANG_ADDRESS: boomerang,
       USDC_ADDRESS: usdc,
       SIGNED_PLEDGE_ADDRESS: signedPledge,
-      STREAM_SECURITY_TOKEN: token,
       KEEPER_PRIVATE_KEY: keeperKey,
       DEMO_RECIPIENT: recipient,
       PORT: String(KEEPER_PORT),
       KEEPER_DATA: mkdtempSync(join(tmpdir(), "boomerang-keeper-")),
     },
-    quiet: /^(GET|OPTIONS) \/(ledger|health|relay) 20[04]$|^POST \/stream 200$/,
+    quiet: /^(GET|OPTIONS) \/(ledger|health|relay) 20[04]$/,
   });
   await until("the keeper", async () => (await fetch(`${keeperUrl}/health`)).status === 200);
-  start("stream", "node", ["scripts/local-stream.mjs"], {
-    cwd: root,
-    env: { RPC_URL: rpcUrl, KEEPER_URL: `${keeperUrl}/stream`, BOOMERANG_ADDRESS: boomerang, STREAM_SECURITY_TOKEN: token, FROM_BLOCK: "0", EVERY_MS: "500" },
-    quiet: /^blocks \d+\.\.\d+: \d+ delivered$/,
-  });
 
   // 6. The page.
   start("web", "npx", ["vite", "--host", "127.0.0.1", "--port", String(WEB_PORT), "--strictPort"], {

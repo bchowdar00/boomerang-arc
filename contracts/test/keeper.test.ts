@@ -1,11 +1,10 @@
 // Every amount and account in these tests is invented. None is a reading of any real campaign.
 //
 // The keeper driven against the live contract: deliveries are built from the chain's own logs in
-// the shape streams/filter.js returns, the keeper's sender signs as an account with no role, and
+// the shape the keeper's own node reading makes, the keeper's sender signs as an account with no role, and
 // the loop must leave the contract owing nothing. These tests exercise the plumbing around the
 // two pure modules (the ledger and the planner), not the arithmetic, which keeper-plan covers.
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -26,7 +25,6 @@ import { memoryStore, openStore } from "../../services/keeper/src/store.ts";
 
 type W = Awaited<ReturnType<typeof setup>>;
 
-const SECRET = "keeper-test-token-invented";
 const ZERO = "0x0000000000000000000000000000000000000000";
 
 function toHex(v: bigint | number): `0x${string}` {
@@ -39,7 +37,7 @@ function actionKey(a: Action): string {
   return `payMany:${a.id}:${a.backers.join(",")}`;
 }
 
-/** One delivery per block that holds a Boomerang log, in block order, shaped like filter.js. */
+/** One delivery per block that holds a Boomerang log, in block order. */
 async function blockDeliveries(w: W): Promise<Delivery[]> {
   const logs = await w.publicClient.getLogs({ address: w.boomerang.address, fromBlock: 0n });
   const byBlock = new Map<bigint, typeof logs>();
@@ -61,16 +59,16 @@ async function blockDeliveries(w: W): Promise<Delivery[]> {
       transactionHash: lg.transactionHash,
       logIndex: lg.logIndex ?? 0,
     }));
-    out.push({ v: 1, fromBlock: Number(bn), toBlock: Number(bn), time: Number(block.timestamp), logs: raw, opened: [], due: [] });
+    out.push({ fromBlock: Number(bn), toBlock: Number(bn), time: Number(block.timestamp), logs: raw });
   }
   return out;
 }
 
-/** A no-log delivery at the latest block: a "due" or heartbeat tick that carries the clock. */
+/** A no-log delivery at the latest block: a tick that carries the clock to the keeper. */
 async function tick(w: W): Promise<Delivery> {
   const bn = await w.publicClient.getBlockNumber();
   const block = await w.publicClient.getBlock({ blockNumber: bn });
-  return { v: 1, fromBlock: Number(bn), toBlock: Number(bn), time: Number(block.timestamp), logs: [], opened: [], due: [] };
+  return { fromBlock: Number(bn), toBlock: Number(bn), time: Number(block.timestamp), logs: [] };
 }
 
 /** Re-deliver every block, then a clock tick, `rounds` times, awaiting each round's sends. */
@@ -230,7 +228,7 @@ describe("keeper against the contract", async function () {
     }
   });
 
-  it("keeper.server: a missed campaign settles end to end through signed POSTs to the server", async function () {
+  it("keeper.server: a missed campaign settles end to end, then is read back over /ledger", async function () {
     const w = await setup();
     const m = await missedCampaign(w);
 
@@ -239,27 +237,15 @@ describe("keeper against the contract", async function () {
       store: memoryStore(),
       send: makeSender({ publicClient: w.publicClient, walletClient: w.stranger, boomerang: w.boomerang.address }),
     });
-    const server = createServer({ keeper, secret: SECRET });
+    // The server is kept only for the /ledger read below; deliveries are handed straight to the keeper.
+    const server = createServer({ keeper });
     await new Promise<void>((r) => server.listen(0, r));
     const { port } = server.address() as AddressInfo;
     const url = `http://127.0.0.1:${port}`;
 
-    const post = async (d: Delivery) => {
-      const body = JSON.stringify(d);
-      const nonce = "n" + Math.random().toString(36).slice(2);
-      const ts = String(Math.floor(Date.now() / 1000));
-      const sig = createHmac("sha256", Buffer.from(SECRET)).update(nonce + ts + body).digest("hex");
-      const res = await fetch(url + "/stream", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-qn-nonce": nonce, "x-qn-timestamp": ts, "x-qn-signature": sig },
-        body,
-      });
-      assert.equal(res.status, 200);
-    };
-
     try {
       for (let i = 0; i < 20; i++) {
-        for (const d of await blockDeliveries(w)) await post(d);
+        for (const d of await blockDeliveries(w)) await keeper.deliver(d).done;
         // A direct awaited tick drives and lets the queued sends finish before the next read.
         await keeper.deliver(await tick(w)).done;
         if (keeper.health().settled && (await w.boomerang.read.totalOwed()) === 0n) break;
@@ -611,7 +597,7 @@ describe("keeper against the contract", async function () {
     const sentBefore = await sentByKeeper();
     const askedBefore = asks.length;
 
-    // Someone holding the Stream's token forges pledges by 80 backers who do not exist.
+    // Someone who can feed the keeper forges pledges by 80 backers who do not exist.
     const now = await tick(w);
     let seq = BigInt(keeper.health().lastSeq);
     const made = (i: number): Address => `0x${(0xf000 + i).toString(16).padStart(40, "0")}`;
@@ -677,7 +663,7 @@ describe("keeper against the contract", async function () {
     const first = asks.length;
     assert.ok(first >= 2, "the returns and the payout were planned and put to the contract");
 
-    // The contract shows no outcome. A node a block behind the Stream shows the same, so the
+    // The contract shows no outcome. A node a block behind the chain's head shows the same, so the
     // calls are asked once more, 20 seconds on. After a minute of "open" the keeper takes the
     // contract's word over the ledger's: the campaign is open and not due. In case the node was
     // only behind, the ledger's outcome is tried again at 2, 4, 8 and 16 minutes.
@@ -817,7 +803,7 @@ describe("keeper against the contract", async function () {
       timer: () => timer,
     });
     for (const d of before) keeper.deliver(d);
-    // Heartbeats only: the Finalized event never reaches this keeper (a false event could hold its number).
+    // Clock ticks only: the Finalized event never reaches this keeper (a false event could hold its number).
     const beat = await tick(w);
     // One delivery is enough: told the outcome, the keeper plans again at once and pays.
     await keeper.deliver(beat).done;
@@ -850,7 +836,7 @@ describe("keeper against the contract", async function () {
     await w.usdc.write.setBlocked([w.dave.account.address, true]);
     const k = watched(w);
     for (const d of before) k.keeper.deliver(d);
-    // Heartbeats only from here: the ledger never hears the outcome, a payout or a failure.
+    // Clock ticks only from here: the ledger never hears the outcome, a payout or a failure.
     const beat = await tick(w);
     const run = async (rounds: number, step: bigint) => {
       for (let i = 0; i < rounds; i++) {
@@ -873,7 +859,7 @@ describe("keeper against the contract", async function () {
     assert.equal(k.keeper.ledger.campaigns.get(m.id)!.outcome, Outcome.Open, "the ledger never heard");
   });
 
-  it("keeper.lag: a node behind the Stream says 'open' after the true outcome is heard; the keeper waits a minute before it believes it, counted from the outcome", async function () {
+  it("keeper.lag: a node behind the chain's head says 'open' after the true outcome is heard; the keeper waits a minute before it believes it, counted from the outcome", async function () {
     const w = await setup();
     const m = await missedCampaign(w);
     const before = await blockDeliveries(w); // closed and due, no outcome yet
@@ -886,7 +872,7 @@ describe("keeper against the contract", async function () {
     };
     const keeper = createKeeper({ boomerang: w.boomerang.address, store: memoryStore(), send: behind, timer: () => timer });
     for (const d of before) await keeper.deliver(d).done;
-    await keeper.deliver(await tick(w)).done; // a heartbeat at the closing time
+    await keeper.deliver(await tick(w)).done; // a clock tick at the closing time
     assert.deepEqual(asks, [{ kind: "finalize", id: m.id }], "due by the ledger, so asked; the node says not yet");
     // The ledger says open and so does the contract: there is no disagreement to report, however long it lasts.
     timer += 100n;
@@ -1153,7 +1139,7 @@ describe("keeper against the contract", async function () {
     assert.equal(await k.sent(), 0);
   });
 
-  it("keeper.absentLag: a real campaign that a node behind the Stream does not have yet is asked about again and settled", async function () {
+  it("keeper.absentLag: a real campaign that a node behind the chain's head does not have yet is asked about again and settled", async function () {
     const w = await setup();
     const m = await missedCampaign(w);
     // Asked twice, the node does not have the campaign. The third time it has it, a block short of the closing second.
@@ -1302,23 +1288,35 @@ describe("keeper against the contract", async function () {
     assert.equal(await w.boomerang.read.totalOwed(), 0n);
   });
 
-  it("keeper.late: an old delivery arriving after a newer one does not turn the clock or the health display back", async function () {
+  it("keeper.late: an old delivery arriving after a newer one does not turn the clock or the newest block back", async function () {
     const w = await setup();
     await missedCampaign(w);
     const keeper = createKeeper({ boomerang: w.boomerang.address, store: memoryStore(), send: async () => ({ ok: false, error: "not sending in this test" }) });
     const now = await tick(w);
-    keeper.deliver({ ...now, beat: true });
+    keeper.deliver(now);
     const shown = keeper.health();
-    assert.equal(shown.lastBeatBlock, now.toBlock);
-    assert.equal(shown.kvError, null);
+    assert.equal(shown.lastBlock, now.toBlock);
 
-    keeper.deliver({ ...now, fromBlock: now.toBlock - 5, toBlock: now.toBlock - 5, time: now.time - 500, beat: true, kvError: "kv down" });
+    keeper.deliver({ ...now, fromBlock: now.toBlock - 5, toBlock: now.toBlock - 5, time: now.time - 500 });
     const after = keeper.health();
     assert.equal(after.lastTime, shown.lastTime);
     assert.equal(after.lastBlock, shown.lastBlock);
-    assert.equal(after.lastBeatBlock, shown.lastBeatBlock);
-    assert.equal(after.kvError, null);
-    assert.equal(after.deliveries, 2);
+  });
+
+  it("keeper.deliveryShape: a delivery is just its four fields, and health carries none of the removed ones", async function () {
+    const w = await setup();
+    await missedCampaign(w);
+    const keeper = createKeeper({ boomerang: w.boomerang.address, store: memoryStore(), send: async () => ({ ok: false, error: "not sending in this test" }) });
+    const [one] = await blockDeliveries(w);
+    const d: Delivery = { fromBlock: one.fromBlock, toBlock: one.toBlock, time: one.time, logs: one.logs };
+    const taken = keeper.deliver(d);
+    await taken.done;
+    assert.ok(taken.applied > 0, "the delivery's logs were applied");
+    assert.equal(keeper.health().lastBlock, one.toBlock);
+    const h = keeper.health() as unknown as Record<string, unknown>;
+    for (const gone of ["lastDeliveryAt", "lastBeatBlock", "streamBlock", "kvError", "deliveries"]) {
+      assert.equal(gone in h, false, `health should not carry ${gone}`);
+    }
   });
 
   it("keeper.storeDown: when the store cannot be written the delivery fails whole and nothing is applied; it applies once the store is back", async function () {
@@ -1484,7 +1482,7 @@ describe("keeper against the contract", async function () {
   });
 
   it("sender.behind: a node that has not caught up with the settlement is asked again later; nothing is refused and nothing is held", async function () {
-    // The Stream may read one node and the keeper another that is a block or two behind.
+    // The keeper may hear one node and its sender read another that is a block or two behind.
     const w = await setup();
     const m = await missedCampaign(w);
     const before = await w.publicClient.getBlockNumber();
@@ -1608,7 +1606,7 @@ describe("keeper against the contract", async function () {
       usdc: w.usdc.address,
       recipient: w.recipient.account.address,
       store: memoryStore(),
-      ledger: () => emptyLedger(), // a keeper the Stream has told nothing yet
+      ledger: () => emptyLedger(), // a keeper told nothing yet
     });
     const first = await desk.openCampaign();
     assert.ok(first.ok);
@@ -1891,7 +1889,7 @@ describe("keeper against the contract", async function () {
         usdc: w.usdc.address,
         recipient: w.recipient.account.address,
         store,
-        ledger: () => emptyLedger(), // the Stream has not delivered the campaign yet
+        ledger: () => emptyLedger(), // no delivery has carried the campaign yet
       });
 
     // The creation cannot even be made ready: nothing was sent, nothing is remembered.

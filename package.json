@@ -14,7 +14,7 @@
     "web"
   ],
   "scripts": {
-    "test": "npm test --workspaces --if-present && node --test streams/ && node --test web/test/",
+    "test": "npm test --workspaces --if-present && node --test web/test/",
     "verify": "npm run build -w @boomerang/contracts && node scripts/check-live.mjs"
   }
 }

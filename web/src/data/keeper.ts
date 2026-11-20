@@ -217,7 +217,7 @@ export function backerDifferences(ledger: LedgerBackerView, chain: Backer): stri
 
 export type Standing =
   | { kind: "level"; differences: string[] } // the ledger has every event the contract has emitted
-  | { kind: "behind"; by: bigint } // the Stream has not delivered the newest events yet: wait, do not compare
+  | { kind: "behind"; by: bigint } // the keeper has not heard the newest events yet: wait, do not compare
   | { kind: "ahead"; by: bigint }; // more events than the contract has emitted: not this contract's ledger
 
 /**

@@ -4,8 +4,8 @@
 //
 // It refuses to do anything unless it is talking to Arc Testnet (chain 5042002), prints the
 // deployer and the three addresses it will use, then hands off to deployAll, which deploys the
-// three contracts (Boomerang, PledgeRouter, SignedPledge), reads them back, and records the result in the kit's addresses.json and a deployable
-// copy of the Stream filter. Paths resolve from this file, not the working directory.
+// three contracts (Boomerang, PledgeRouter, SignedPledge), reads them back, and records the result in the kit's addresses.json.
+// Paths resolve from this file, not the working directory.
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
@@ -18,8 +18,6 @@ import { deployAll } from "./lib/deploy.ts";
 const ARC_CHAIN_ID = 5042002;
 const here = new URL(".", import.meta.url);
 const addressesPath = fileURLToPath(new URL("../packages/kit/addresses.json", here));
-const filterSource = fileURLToPath(new URL("../streams/filter.js", here));
-const filterOut = fileURLToPath(new URL("../streams/filter.deployed.js", here));
 
 async function main(): Promise<void> {
   const { viem } = await network.connect();
@@ -36,7 +34,7 @@ async function main(): Promise<void> {
     console.error(`addresses.json has no usdc/transmitter/messenger for chain ${ARC_CHAIN_ID}`);
     process.exit(1);
   }
-  // A second deployment would point the app, the keeper and the Stream at a new, empty contract
+  // A second deployment would point the app and the keeper at a new, empty contract
   // and leave the first one's campaigns behind. It has to be asked for by name.
   if (entry.boomerang && process.env.BOOMERANG_REDEPLOY !== "1") {
     console.error(`Boomerang is already recorded at ${entry.boomerang} for chain ${ARC_CHAIN_ID}.`);
@@ -63,8 +61,6 @@ async function main(): Promise<void> {
     transmitter,
     messenger,
     addressesPath,
-    filterSource,
-    filterOut,
     log: (line) => console.log(line),
   });
   console.log("done.");

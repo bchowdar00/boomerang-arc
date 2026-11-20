@@ -1,16 +1,15 @@
-// The keeper's HTTP face: one webhook for the Stream, and a few read-only and demo routes.
+// The keeper's HTTP face: a few read-only and demo routes, plus /relay for one-signature pledges.
 //
-// POST /stream is the only consumer of the QuickNode Stream; it verifies the signature before
-// the keeper ever sees the body. The GET routes and the two demo routes are for the app, so they
-// carry CORS; /stream does not.
+// Nothing here feeds the keeper: its events come from its own reading of Arc's node (follow.ts).
+// Every route is for the app, so each carries CORS. A body is read as plain JSON text; a
+// compressed body is not unpacked, so it fails to parse and is refused like any other bad request.
 import http from "node:http";
 
 import { missing } from "../../../packages/kit/src/index.ts";
 import type { Desk } from "./demo.ts";
 import type { Follower } from "./follow.ts";
-import { parseDelivery, type Keeper } from "./keeper.ts";
+import { type Keeper } from "./keeper.ts";
 import { RELAY, type Relay } from "./relay.ts";
-import { bodyText, verifySignature } from "./verify.ts";
 
 const CORS_PATHS = new Set(["/ledger", "/health", "/demo/usdc", "/demo/campaign", "/demo/campaign/two", "/relay"]);
 const TOO_LARGE = Symbol("too-large");
@@ -123,25 +122,21 @@ function readBody(req: http.IncomingMessage, limit: number, budget: Budget, dead
 
 export function createServer(o: {
   keeper: Keeper;
-  secret: string;
   desk?: Desk;
   /** Submits one-signature pledges (POST /relay); absent when the keeper has no key or no helper. */
   relay?: Relay;
   /** The keeper's own reading of the node (follow.ts), shown in /health; absent when it is off. */
   follower?: Pick<Follower, "state">;
-  /** The largest body /stream takes, packed or unpacked. Default 1 MiB. */
-  maxBody?: number;
-  /** What all bodies being read at one moment may hold together. Default eight times maxBody. */
+  /** What all bodies being read at one moment may hold together. Default 256 KiB: over a hundred of the largest bodies a route takes. */
   maxHeld?: number;
   /** How long a body may take to arrive, in milliseconds. Default ten seconds. */
   bodyDeadlineMs?: number;
   log?: (line: string) => void;
 }): http.Server {
-  const { keeper, secret, desk, relay, follower, log } = o;
-  // A delivery carries only Boomerang's own logs for a block or a few: a megabyte is far more
-  // than that needs. The same limit holds for a compressed body once unpacked.
-  const maxBody = o.maxBody ?? 1024 * 1024;
-  const budget: Budget = { held: 0, max: o.maxHeld ?? 8 * maxBody };
+  const { keeper, desk, relay, follower, log } = o;
+  // The largest body a route takes is 2 KiB (/relay), so the budget is what about 128 such
+  // bodies arriving at once would hold. Past it a body is refused as busy until others finish.
+  const budget: Budget = { held: 0, max: o.maxHeld ?? 256 * 1024 };
   const bodyDeadlineMs = o.bodyDeadlineMs ?? 10_000;
 
   const server = http.createServer((req, res) => {
@@ -161,8 +156,8 @@ export function createServer(o: {
   // (a body the server reads has its own, shorter deadline). And connections are counted. The
   // defaults (five minutes, no limit) are what a stranger would use to tie the process up.
   // These bound what one connection costs; they do not stop a machine that keeps opening
-  // connections from crowding the Stream out while it lasts (docs/ARCHITECTURE.md says what
-  // that can and cannot do).
+  // connections from crowding the keeper's own requests out while it lasts (docs/ARCHITECTURE.md
+  // says what that can and cannot do).
   server.headersTimeout = 15_000;
   server.requestTimeout = 30_000;
   server.maxConnections = 256;
@@ -199,17 +194,10 @@ export function createServer(o: {
       res.end(JSON.stringify(bodyObj));
       if (log) log(`${method} ${path} ${status}`);
     };
-    const refusal = (r: Refused): [number, string] =>
-      r === TOO_LARGE ? [413, "payload too large"] : r === TOO_SLOW ? [408, "the body took too long"] : [503, "busy"];
     // The length a request declares for its body, when it declares one that can be read.
     const declared = (): number | null => {
       const v = req.headers["content-length"];
       return typeof v === "string" && /^[0-9]{1,15}$/.test(v) ? Number(v) : null;
-    };
-
-    const header = (name: string): string | undefined => {
-      const v = req.headers[name];
-      return typeof v === "string" ? v : undefined;
     };
 
     if (method === "OPTIONS") {
@@ -230,53 +218,6 @@ export function createServer(o: {
       return;
     }
 
-    if (method === "POST" && path === "/stream") {
-      // The three signature headers are looked at before a byte of the body is taken in: a
-      // request without them is not from the Stream, whatever it carries.
-      const nonce = header("x-qn-nonce");
-      const timestamp = header("x-qn-timestamp");
-      const signature = header("x-qn-signature");
-      const okHeaders = [nonce, timestamp, signature].every((h) => typeof h === "string" && h.length >= 1 && h.length <= 128);
-      if (!okHeaders) return refuse(401, { error: "unauthorized" }, false);
-      const length = declared();
-      if (length !== null && length > maxBody) return refuse(413, { error: "payload too large" }, false);
-      readBody(req, maxBody, budget, bodyDeadlineMs)
-        .then((raw) => {
-          if (!(raw instanceof Uint8Array)) {
-            const [status, error] = refusal(raw);
-            return refuse(status, { error }, false);
-          }
-          bodyTaken = true;
-          const text = bodyText(raw, header("content-encoding"), maxBody);
-          if (text === "") return reply(401, { error: "unauthorized" }, false);
-          if (!verifySignature(secret, nonce, timestamp, text, signature)) return reply(401, { error: "unauthorized" }, false);
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(text);
-          } catch {
-            return reply(400, { error: "bad json" }, false);
-          }
-          let delivery;
-          try {
-            delivery = parseDelivery(parsed);
-          } catch {
-            return reply(400, { error: "bad delivery" }, false);
-          }
-          let taken;
-          try {
-            taken = keeper.deliver(delivery);
-          } catch {
-            // The delivery was good and could not be kept (the store cannot be written). That is
-            // this server's fault, not the sender's: the Stream is told to send it again.
-            return reply(503, { error: "not stored, send it again" }, false);
-          }
-          taken.done.catch(() => {}); // a sender fault must never crash the process
-          reply(200, { applied: taken.applied, repeats: taken.repeats }, false);
-        })
-        .catch(() => refuse(400, { error: "bad request" }, false));
-      return;
-    }
-
     if (method === "GET" && path === "/ledger") return reply(200, ledgerJson(keeper), true);
     if (method === "GET" && path === "/health") return reply(200, { ...keeper.health(), node: follower ? follower.state() : null, desk: desk ? desk.address : null, relay: relay ? relay.address : null }, true);
 
@@ -290,7 +231,7 @@ export function createServer(o: {
           bodyTaken = true;
           let body: unknown;
           try {
-            body = JSON.parse(bodyText(raw, header("content-encoding"), 1024));
+            body = JSON.parse(Buffer.from(raw).toString("utf8"));
           } catch {
             return reply(400, { ok: false, reason: "bad-address" }, true);
           }
@@ -327,7 +268,7 @@ export function createServer(o: {
           bodyTaken = true;
           let body: unknown;
           try {
-            body = JSON.parse(bodyText(raw, header("content-encoding"), RELAY.maxBody));
+            body = JSON.parse(Buffer.from(raw).toString("utf8"));
           } catch {
             return reply(400, { ok: false, reason: "bad-request" }, true);
           }

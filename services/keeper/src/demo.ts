@@ -204,7 +204,7 @@ export function createDesk(o: {
 
   let opening = false;
   // The last campaign this desk opened, or began to open (`id` null: its creation was sent and
-  // the id is not known yet). The ledger learns of a campaign only when the Stream delivers it;
+  // the id is not known yet). The ledger learns of a campaign only when a delivery carries it;
   // this covers the moments before that. It is written to the store before the creation is sent,
   // so a restart at any moment does not open a second campaign beside it.
   type Last = { id: bigint | null; closesAt: bigint };

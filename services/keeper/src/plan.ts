@@ -4,7 +4,7 @@
 // The keeper has no rights in the contract. Every call it makes (finalize, paySide, payMany)
 // is open to anyone, and each is harmless to repeat: finalize does nothing once the outcome
 // is set, a side pays once, a backer is paid once. So this plan may be computed again on
-// every delivery from the Stream, and a call that was already made costs only its gas.
+// every delivery, and a call that was already made costs only its gas.
 import type { Ledger, LedgerCampaign } from "../../../packages/kit/src/index.ts";
 import { Outcome, Side, potsIn, sideAmount } from "../../../packages/kit/src/index.ts";
 

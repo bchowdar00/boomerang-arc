@@ -153,9 +153,9 @@ export function Proof({ ctx }: { ctx: Ctx }) {
         ) : null}
       </Section>
 
-      {page.stream ? (
-        <Section title={WORDS.proof.stream}>
-          <Rows rows={page.stream} explorer={null} />
+      {page.keeper ? (
+        <Section title={WORDS.proof.keeper}>
+          <Rows rows={page.keeper} explorer={null} />
         </Section>
       ) : null}
 

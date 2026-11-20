@@ -43,8 +43,8 @@ export function openStore(dir: string): Store {
   const events = join(dir, "events.jsonl");
 
   // A write cut off by a crash leaves a last line with no newline. Close that line now, so the
-  // next event starts on a line of its own; the broken line is dropped by `load`, and the Stream
-  // delivers its event again because the cut-off delivery was never answered.
+  // next event starts on a line of its own; the broken line is dropped by `load`, and the node
+  // reader (follow.ts) delivers its event again because the cut-off delivery was never answered.
   try {
     const text = readFileSync(events, "utf8");
     if (text.length > 0 && !text.endsWith("\n")) appendFileSync(events, "\n");

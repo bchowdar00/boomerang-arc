@@ -499,27 +499,33 @@ describe("the keeper's health", function () {
     assert.equal(readHealth({ ...wire, lastErrors: ["a\u0085b\u007fc"] }).lastErrors[0], "a b c");
   });
 
-  it("health.old: a keeper that sends neither streamBlock nor node reads both as null, the rest as before", function () {
+  it("health.old: a keeper that sends no node reads it as null, the rest as before", function () {
     const h = readHealth(wire);
-    assert.equal(h.streamBlock, null);
     assert.equal(h.node, null);
     assert.equal(h.lastBlock, 400);
-    assert.equal(h.deliveries, 9);
   });
 
-  it("health.node: the two new fields are read when the keeper sends them", function () {
-    const h = readHealth({ ...wire, streamBlock: 402, node: { following: true, reads: 12, lastReadAt: 1_794_000_006_000, readTo: 405, faults: 1 } });
-    assert.equal(h.streamBlock, 402);
-    assert.deepEqual(h.node, { following: true, reads: 12, lastReadAt: 1_794_000_006_000, readTo: 405, faults: 1 });
+  it("health.noFeed: the page keeps nothing about a pushed feed, whether the keeper still sends those fields, sends them oddly, or has dropped them", function () {
+    const gone = ["lastDeliveryAt", "lastBeatBlock", "kvError", "deliveries", "streamBlock"];
+    const without = Object.fromEntries(Object.entries(wire).filter(([k]) => !gone.includes(k)));
+    for (const sent of [wire, without, { ...wire, kvError: 5, lastBeatBlock: "300", deliveries: -1, streamBlock: "x", lastDeliveryAt: "then" }]) {
+      const h = readHealth(sent) as Record<string, unknown>;
+      for (const k of gone) assert.equal(k in h, false, k);
+      assert.equal(h.lastBlock, 400);
+    }
+  });
+
+  it("health.node: the node's reading is read when the keeper sends it", function () {
+    const h = readHealth({ ...wire, node: { reads: 12, lastReadAt: 1_794_000_006_000, readTo: 405, faults: 1 } });
+    assert.deepEqual(h.node, { reads: 12, lastReadAt: 1_794_000_006_000, readTo: 405, faults: 1 });
     // null reads of its nullable fields are kept.
-    assert.deepEqual(readHealth({ ...wire, streamBlock: null, node: { following: false, reads: 0, lastReadAt: null, readTo: null, faults: 0 } }).node, {
-      following: false, reads: 0, lastReadAt: null, readTo: null, faults: 0,
+    assert.deepEqual(readHealth({ ...wire, node: { reads: 0, lastReadAt: null, readTo: null, faults: 0 } }).node, {
+      reads: 0, lastReadAt: null, readTo: null, faults: 0,
     });
   });
 
-  it("health.node.odd: a node with a non-number count or no following throws, naming the field", function () {
-    assert.throws(() => readHealth({ ...wire, node: { following: true, reads: "3", lastReadAt: null, readTo: null, faults: 0 } }), /at node\.reads/);
-    assert.throws(() => readHealth({ ...wire, node: { reads: 3, lastReadAt: null, readTo: null, faults: 0 } }), /at node\.following/);
+  it("health.node.odd: a node with a non-number count throws, naming the field", function () {
+    assert.throws(() => readHealth({ ...wire, node: { reads: "3", lastReadAt: null, readTo: null, faults: 0 } }), /at node\.reads/);
   });
 
   it("health.absent: campaign numbers the contract says it does not have, none when the keeper sends no list", function () {
@@ -531,7 +537,7 @@ describe("the keeper's health", function () {
   });
 
   it("refuses a field that is missing or of the wrong kind, and says which", function () {
-    for (const [field, bad] of [["lastSeq", 12], ["pending", -1], ["missing", "none"], ["gaveUp", "x"], ["settled", "yes"], ["desk", "0x12"], ["kvError", 5], ["lastBeatBlock", "300"]] as const) {
+    for (const [field, bad] of [["lastSeq", 12], ["pending", -1], ["missing", "none"], ["gaveUp", "x"], ["settled", "yes"], ["desk", "0x12"]] as const) {
       assert.throws(() => readHealth({ ...wire, [field]: bad }), new RegExp(`at ${field}`), field);
     }
     assert.throws(() => readHealth(null), /health/);
@@ -550,8 +556,8 @@ describe("the Proof page", function () {
   };
   const ledger = (over: Partial<LedgerView> = {}): LedgerView => ({ lastSeq: 12n, totalOwed: usd(1740), missing: null, campaigns: [inLedger], feed: [], ...over });
   const healthWire = {
-    lastSeq: "12", missing: null, pending: 0, repeats: 3, lastBlock: 400, lastTime: "1794000000", lastDeliveryAt: 1_794_000_005_000, lastBeatBlock: 300,
-    kvError: null, deliveries: 9, sent: 4, failedSends: 1, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
+    lastSeq: "12", missing: null, pending: 0, repeats: 3, lastBlock: 400, lastTime: "1794000000",
+    sent: 4, failedSends: 1, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
   };
   const health = readHealth(healthWire);
   const ZERO = "0x0000000000000000000000000000000000000000" as const;
@@ -559,9 +565,9 @@ describe("the Proof page", function () {
   const checksFor = (lc: LedgerCampaignView, over: (b: LedgerBackerView) => Partial<Backer> = () => ({})): BackerCheck[] =>
     lc.backers.map((b) => ({ id: lc.id, address: b.address, chain: { principal: b.principal, weighted: b.weighted, payTo: b.payTo ?? ZERO, paid: b.paid, ...over(b) } }));
   const page = (over: Partial<Parameters<typeof proofPage>[0]> = {}) =>
-    proofPage({ custody, campaigns: [chain], count: 1n, ledger: ledger(), health, backerChecks: checksFor(inLedger), backerTotal: inLedger.backers.length, where, pace: { state: "prompt", by: "stream" }, ...over });
+    proofPage({ custody, campaigns: [chain], count: 1n, ledger: ledger(), health, backerChecks: checksFor(inLedger), backerTotal: inLedger.backers.length, where, pace: { state: "prompt" }, ...over });
 
-  it("view.proof: holds against owes at one block, the second ledger in agreement, and the Stream's pulse", function () {
+  it("view.proof: holds against owes at one block, the second ledger in agreement, and the keeper's pulse", function () {
     const p = page();
     assert.deepEqual(p.custody, {
       state: "ok",
@@ -573,18 +579,14 @@ describe("the Proof page", function () {
       line: "A second ledger, rebuilt only from the contract's 12 events as the keeper received them, agrees with the contract at block 400 on every figure of its one campaign and on 31 backer records.",
       differences: [],
     });
-    assert.deepEqual(p.stream, [
-      { label: "Fed by", value: "The QuickNode Stream" },
+    assert.deepEqual(p.keeper, [
+      { label: "Fed by", value: "Arc's node, read by the keeper itself." },
       { label: "Newest block heard", value: "400" },
-      { label: "Stream deliveries taken since the keeper started", value: "9" },
-      { label: "Last Stream delivery", value: "6 Nov 2026, 21:20 UTC" },
-      { label: "Last Stream heartbeat", value: "Block 300" },
       { label: "Events missing", value: "None" },
       { label: "Events set aside as not fitting", value: "0" },
       { label: "Campaigns in the events that the contract does not have (or not yet)", value: "None" },
       { label: "Calls sent", value: "4 went through, 1 did not" },
       { label: "Calls given up on", value: "None" },
-      { label: "Stream store", value: "No fault reported" },
       { label: "Every settled campaign fully paid, by the keeper's ledger", value: "Yes" },
     ]);
     assert.deepEqual(p.facts.map((f) => [f.label, f.address]), [["Contract", BOOMERANG], ["Token (USDC)", USDC], ["Router for pledges from other chains", where.router], ["Owner", undefined]]);
@@ -598,33 +600,26 @@ describe("the Proof page", function () {
     assert.ok(LIMITS.length >= 5);
   });
 
-  it("proof.fedBy: how the keeper is fed, the renamed labels, and the node-reads row", function () {
-    const node = { following: true, reads: 12, lastReadAt: 1_794_000_006_000, readTo: 405, faults: 0 };
+  it("proof.fedBy: how the keeper is fed, with no row or word about any other feed, and the node-reads row", function () {
+    const node = { reads: 12, lastReadAt: 1_794_000_006_000, readTo: 405, faults: 0 };
     const nodeHealth = readHealth({ ...healthWire, node });
-    const v = (p: ReturnType<typeof page>, label: string) => p.stream!.find((r) => r.label === label)!.value;
+    const v = (p: ReturnType<typeof page>, label: string) => p.keeper!.find((r) => r.label === label)!.value;
 
-    // The five "Fed by" values.
-    assert.equal(v(page({ pace: { state: "prompt", by: "stream" } }), "Fed by"), "The QuickNode Stream");
-    assert.equal(
-      v(page({ pace: { state: "prompt", by: "node" }, health: readHealth({ ...healthWire, lastDeliveryAt: null, node }) }), "Fed by"),
-      "Arc's node, read by the keeper itself. The Stream has delivered nothing since the keeper started.",
-    );
-    assert.equal(
-      v(page({ pace: { state: "prompt", by: "node" }, health: nodeHealth }), "Fed by"),
-      "Arc's node, read by the keeper itself. The Stream's last delivery was 6 Nov 2026, 21:20 UTC.",
-    );
+    // The three "Fed by" values.
+    assert.equal(v(page(), "Fed by"), "Arc's node, read by the keeper itself.");
+    assert.equal(v(page({ health: nodeHealth }), "Fed by"), "Arc's node, read by the keeper itself.");
     assert.equal(v(page({ pace: { state: "behind", heard: 0, blocks: 901 } }), "Fed by"), "Nothing yet. The keeper has heard no block since it started.");
     assert.equal(v(page({ pace: { state: "behind", heard: 400, blocks: 950 } }), "Fed by"), "Nothing right now. The keeper last heard block 400, 950 blocks behind the chain.");
 
-    // The renamed labels carry the same values as before.
+    // Nothing on the page names any other feed, whatever an old keeper still sends.
     const p = page();
+    for (const q of [p, page({ health: nodeHealth }), page({ pace: { state: "behind", heard: 0, blocks: 901 } })]) {
+      assert.equal(q.keeper!.some((r) => /stream/i.test(r.label) || /stream/i.test(r.value)), false);
+    }
     assert.equal(v(p, "Newest block heard"), "400");
-    assert.equal(v(p, "Stream deliveries taken since the keeper started"), "9");
-    assert.equal(v(p, "Last Stream delivery"), "6 Nov 2026, 21:20 UTC");
-    assert.equal(v(p, "Last Stream heartbeat"), "Block 300");
 
     // The node-reads row shows only when the keeper reads the node, in both of its forms.
-    assert.equal(p.stream!.some((r) => r.label === "Node reads since the keeper started"), false);
+    assert.equal(p.keeper!.some((r) => r.label === "Node reads since the keeper started"), false);
     assert.equal(v(page({ health: nodeHealth }), "Node reads since the keeper started"), "12");
     assert.equal(
       v(page({ health: readHealth({ ...healthWire, node: { ...node, faults: 2 } }) }), "Node reads since the keeper started"),
@@ -632,19 +627,15 @@ describe("the Proof page", function () {
     );
 
     // Row order, with the node present.
-    assert.deepEqual(page({ health: nodeHealth }).stream!.map((r) => r.label), [
+    assert.deepEqual(page({ health: nodeHealth }).keeper!.map((r) => r.label), [
       "Fed by",
       "Newest block heard",
-      "Stream deliveries taken since the keeper started",
-      "Last Stream delivery",
-      "Last Stream heartbeat",
       "Node reads since the keeper started",
       "Events missing",
       "Events set aside as not fitting",
       "Campaigns in the events that the contract does not have (or not yet)",
       "Calls sent",
       "Calls given up on",
-      "Stream store",
       "Every settled campaign fully paid, by the keeper's ledger",
     ]);
   });
@@ -660,7 +651,7 @@ describe("the Proof page", function () {
   it("view.keeperDown: no keeper, a late one and a foreign one are each named, and none is compared", function () {
     const down = page({ ledger: null, health: null });
     assert.equal(down.second.state, "down");
-    assert.equal(down.stream, null);
+    assert.equal(down.keeper, null);
     assert.equal(down.custody.state, "ok"); // the contract's own line does not depend on the keeper
     const late = page({ ledger: ledger({ lastSeq: 9n, totalOwed: 1n }) });
     assert.deepEqual([late.second.state, late.second.differences], ["behind", []]);
@@ -720,22 +711,19 @@ describe("the Proof page", function () {
     assert.ok(!capped.second.differences.some((d) => /campaign 2/.test(d)));
   });
 
-  it("the keeper's own troubles are shown: a hole in the events, calls given up on, a store fault, its error lines", function () {
+  it("the keeper's own troubles are shown: a hole in the events, calls given up on, its error lines", function () {
     const troubled = readHealth({
-      lastSeq: "12", missing: { from: "4", to: "6" }, pending: 2, repeats: 0, lastBlock: 400, lastTime: "1794000000", lastDeliveryAt: null, lastBeatBlock: null,
-      kvError: "kv down", deliveries: 0, sent: 0, failedSends: 0, rejected: 2, gaveUp: ["finalize:7"], lastErrors: ["gave up on finalize:7"], settled: false, desk: null,
+      lastSeq: "12", missing: { from: "4", to: "6" }, pending: 2, repeats: 0, lastBlock: 400, lastTime: "1794000000",
+      sent: 0, failedSends: 0, rejected: 2, gaveUp: ["finalize:7"], lastErrors: ["gave up on finalize:7"], settled: false, desk: null,
       absent: ["9", "11"],
     });
     const p = page({ health: troubled });
-    const value = (label: string) => p.stream!.find((r) => r.label === label)!.value;
-    assert.equal(value("Last Stream delivery"), "None yet");
-    assert.equal(value("Last Stream heartbeat"), "None yet");
+    const value = (label: string) => p.keeper!.find((r) => r.label === label)!.value;
     assert.equal(value("Events missing"), "Numbers 4 to 6");
     assert.equal(value("Events set aside as not fitting"), "2");
     assert.equal(value("Campaigns in the events that the contract does not have (or not yet)"), "Numbers 9 and 11");
-    assert.equal(page({ health: { ...troubled, absent: [9n] } }).stream!.find((r) => r.label === "Campaigns in the events that the contract does not have (or not yet)")!.value, "Number 9");
+    assert.equal(page({ health: { ...troubled, absent: [9n] } }).keeper!.find((r) => r.label === "Campaigns in the events that the contract does not have (or not yet)")!.value, "Number 9");
     assert.equal(value("Calls given up on"), "1");
-    assert.equal(value("Stream store"), "Fault reported: kv down");
     assert.equal(value("Every settled campaign fully paid, by the keeper's ledger"), "Not yet");
     assert.deepEqual(p.keeperErrors, ["gave up on finalize:7"]);
   });

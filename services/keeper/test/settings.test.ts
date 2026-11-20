@@ -12,10 +12,17 @@ const deployed = () => ({ boomerang: B, usdc: U, deployBlock: 72n });
 const none = () => {
   throw new Error("not deployed");
 };
-const base = { STREAM_SECURITY_TOKEN: "token-invented" };
+const base = {};
 
 describe("the keeper's settings", function () {
-  it("settings.arc: with only a token, the keeper watches Arc Testnet at the deployed addresses", function () {
+  it("settings.noToken: the keeper needs no security token, and its settings carry no secret", function () {
+    const s = settingsFrom({}, deployed);
+    assert.equal("secret" in s, false);
+    // An env var the keeper does not read changes nothing.
+    assert.deepEqual(settingsFrom({ UNRELATED_VAR: "ignored" }, deployed), s);
+  });
+
+  it("settings.arc: with nothing set, the keeper watches Arc Testnet at the deployed addresses", function () {
     const s = settingsFrom(base, deployed);
     assert.equal(s.chain.id, 5042002);
     assert.equal(s.local, false);
@@ -30,7 +37,7 @@ describe("the keeper's settings", function () {
     assert.deepEqual([set.rpcUrl, set.port, set.dataDir, set.key, set.demoRecipient, set.local, set.usdc], ["https://example.quiknode.pro/abc/", 9000, "/var/keeper", "0xkey", R, false, U]);
   });
 
-  it("settings.follow: the keeper reads the node itself when the Stream is silent unless told not to, from the block the kit's contract was created in", function () {
+  it("settings.follow: the keeper reads the node unless told not to, from the block the kit's contract was created in", function () {
     const withBlock = () => ({ boomerang: B, usdc: U, deployBlock: 72n });
     const s = settingsFrom(base, withBlock);
     assert.deepEqual([s.followNode, s.deployBlock], [true, 72n]);
@@ -46,7 +53,7 @@ describe("the keeper's settings", function () {
     // On Arc a read from block 0 would never end. Another contract, or a kit with no block recorded,
     // must say where its events start, or leave the node alone.
     const noBlock = () => ({ boomerang: B, usdc: U });
-    const needs = (e: unknown) => e instanceof SettingsError && /^DEPLOY_BLOCK is required to read the node for this contract \(or set FOLLOW_NODE=off\)$/.test(e.message);
+    const needs = (e: unknown) => e instanceof SettingsError && /^DEPLOY_BLOCK is required to read the node for this contract$/.test(e.message);
     assert.throws(() => settingsFrom({ ...base, BOOMERANG_ADDRESS: R }, withBlock), needs);
     assert.throws(() => settingsFrom(base, noBlock), needs);
     assert.equal(settingsFrom({ ...base, BOOMERANG_ADDRESS: R, DEPLOY_BLOCK: "90" }, withBlock).deployBlock, 90n);
@@ -57,7 +64,6 @@ describe("the keeper's settings", function () {
 
   it("settings.refuses: each wrong value stops the keeper with that value's name, and no value's text", function () {
     const cases: [Record<string, string>, RegExp][] = [
-      [{ STREAM_SECURITY_TOKEN: "" }, /^STREAM_SECURITY_TOKEN is required$/],
       [{ BOOMERANG_ADDRESS: "0x12" }, /^BOOMERANG_ADDRESS is not an address$/],
       [{ USDC_ADDRESS: "usdc" }, /^USDC_ADDRESS is not an address$/],
       [{ DEMO_RECIPIENT: "me" }, /^DEMO_RECIPIENT is not an address$/],
@@ -74,7 +80,7 @@ describe("the keeper's settings", function () {
     for (const [over, want] of cases) {
       assert.throws(
         () => settingsFrom({ ...base, ...over }, deployed),
-        (e: unknown) => e instanceof SettingsError && want.test(e.message) && !e.message.includes("secret-part") && !e.message.includes("token-invented"),
+        (e: unknown) => e instanceof SettingsError && want.test(e.message) && !e.message.includes("secret-part"),
         JSON.stringify(over),
       );
     }

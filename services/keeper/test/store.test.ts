@@ -77,7 +77,7 @@ describe("keeper store", function () {
     openStore(dir).append(nine.slice(0, 3));
     appendFileSync(join(dir, "events.jsonl"), encode(nine[3]).slice(0, 10)); // the crash
     const again = openStore(dir);
-    again.append(nine.slice(3, 5)); // the Stream delivers the cut-off event again, and the next
+    again.append(nine.slice(3, 5)); // the node reader delivers the cut-off event again, and the next
     assert.deepEqual(again.load(), nine.slice(0, 5));
     assert.deepEqual(openStore(dir).load(), nine.slice(0, 5));
   });

@@ -9,11 +9,6 @@ export type HealthView = {
   repeats: number;
   lastBlock: number;
   lastTime: bigint;
-  /** The keeper machine's wall time at its last delivery, in milliseconds; null before the first. */
-  lastDeliveryAt: number | null;
-  lastBeatBlock: number | null;
-  kvError: string | null;
-  deliveries: number;
   sent: number;
   failedSends: number;
   rejected: number;
@@ -25,10 +20,8 @@ export type HealthView = {
   relay: Address | null;
   /** Up to twenty campaign numbers the keeper's events name that the contract says it does not have; none when the keeper sends no list. */
   absent: bigint[];
-  /** The newest block a Stream delivery has covered since the keeper started; null when none has, or when the keeper does not say. */
-  streamBlock: number | null;
-  /** The keeper's own reading of the node, used when the Stream is silent; null when it is off or the keeper does not say. */
-  node: { following: boolean; reads: number; lastReadAt: number | null; readTo: number | null; faults: number } | null;
+  /** The keeper's own reading of the node, which is how it hears the chain; null when it is off or the keeper does not say. */
+  node: { reads: number; lastReadAt: number | null; readTo: number | null; faults: number } | null;
 };
 
 const fail = (path: string, want: string): never => {
@@ -48,7 +41,6 @@ const readNode = (v: unknown): HealthView["node"] => {
   if (typeof v !== "object" || Array.isArray(v)) return fail("node", "object or null");
   const n = v as Record<string, unknown>;
   return {
-    following: typeof n.following === "boolean" ? n.following : fail("node.following", "yes/no"),
     reads: num(n.reads, "node.reads"),
     lastReadAt: numOrNull(n.lastReadAt, "node.lastReadAt"),
     readTo: numOrNull(n.readTo, "node.readTo"),
@@ -56,7 +48,10 @@ const readNode = (v: unknown): HealthView["node"] => {
   };
 };
 
-/** Read what GET /health returned. Throws if a field the page relies on is missing or of the wrong kind. */
+/**
+ * Read what GET /health returned. Throws if a field the page relies on is missing or of the wrong kind.
+ * A keeper may send more than this (older ones count deliveries from a pushed feed); the page reads none of it.
+ */
 export function readHealth(json: unknown): HealthView {
   if (json === null || typeof json !== "object" || Array.isArray(json)) return fail("health", "object");
   const h = json as Record<string, unknown>;
@@ -69,10 +64,6 @@ export function readHealth(json: unknown): HealthView {
     repeats: num(h.repeats, "repeats"),
     lastBlock: num(h.lastBlock, "lastBlock"),
     lastTime: big(h.lastTime, "lastTime"),
-    lastDeliveryAt: numOrNull(h.lastDeliveryAt, "lastDeliveryAt"),
-    lastBeatBlock: numOrNull(h.lastBeatBlock, "lastBeatBlock"),
-    kvError: h.kvError === null ? null : typeof h.kvError === "string" ? text(h.kvError) : fail("kvError", "text or null"),
-    deliveries: num(h.deliveries, "deliveries"),
     sent: num(h.sent, "sent"),
     failedSends: num(h.failedSends, "failedSends"),
     rejected: num(h.rejected, "rejected"),
@@ -82,7 +73,6 @@ export function readHealth(json: unknown): HealthView {
     absent: h.absent === undefined ? [] : Array.isArray(h.absent) ? h.absent.slice(0, 20).map((v, i) => big(v, `absent[${i}]`)) : fail("absent", "list"),
     desk: h.desk === null ? null : typeof h.desk === "string" && /^0x[0-9a-fA-F]{40}$/.test(h.desk) ? (h.desk as Address) : fail("desk", "address or null"),
     relay: h.relay === undefined || h.relay === null ? null : typeof h.relay === "string" && /^0x[0-9a-fA-F]{40}$/.test(h.relay) ? (h.relay as Address) : fail("relay", "address or null"),
-    streamBlock: h.streamBlock === undefined ? null : numOrNull(h.streamBlock, "streamBlock"),
     node: readNode(h.node),
   };
 }

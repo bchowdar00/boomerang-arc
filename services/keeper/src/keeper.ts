@@ -1,11 +1,10 @@
-// The keeper itself: it takes deliveries (the Stream's, or its own reading of the node when the
-// Stream is silent: follow.ts), keeps the event-sourced ledger in step, and makes the settlement
+// The keeper itself: it takes deliveries (from its own reading of Arc's node: follow.ts), keeps the event-sourced ledger in step, and makes the settlement
 // calls the ledger says are due. It holds no rights in the contract; every
 // call it makes is open to anyone and harmless to repeat, so the whole thing is driven from the
 // ledger alone. A delivery seen before adds nothing to the ledger and sends nothing new.
 //
-// A delivery that carries the Stream's signature is believed: someone who holds the Stream's
-// token can feed this ledger false events (docs/STREAM.md says what that can and cannot do).
+// Deliveries are believed: whoever can feed this ledger can feed it false events
+// (docs/ARCHITECTURE.md says what that can and cannot do).
 // What the keeper guards against is being stopped or emptied by a delivery that is wrong:
 //   - an event that does not fit the ledger is set aside and reported, never fatal;
 //   - the keeper's clock is the latest block time a delivery has carried, and is used only to
@@ -21,7 +20,7 @@
 //     is really due;
 //   - the outcome the contract shows, whenever the sender has asked, is set above the ledger's.
 //     A false "settled" for an open campaign is dropped after the contract has said "open" for
-//     `believeOpenAfter` (a node a block behind the Stream says the same for a moment), and the
+//     `believeOpenAfter` (a node a block behind the chain's head says the same for a moment), and the
 //     campaign is then settled when it is really due. In case the node was only behind for
 //     longer, the ledger's outcome is tried again each time the time since the first "open" has
 //     doubled. An outcome the contract has set is taken
@@ -55,19 +54,13 @@ const SIDES = [0, 1, 2]; // Side.Recipient, Side.MatchReturn, Side.BonusReturn
 const VOID_ASKS = 4; // how many times "not due" is heard before a guess that a campaign is void is dropped
 import type { Store } from "./store.ts";
 
-// One delivery from the Stream, in the shape streams/filter.js returns. `logs` are raw event
-// logs; `opened`/`due` are the filter's own hints, which the keeper does not need because it
-// reads the deadlines from the ledger; `beat` marks a heartbeat; `kvError` carries a store fault.
+// One delivery: the raw event logs of a run of blocks, and the time to tell the keeper. Every
+// delivery comes from the keeper's own reading of the node (follow.ts).
 export type Delivery = {
-  v: 1;
   fromBlock: number;
   toBlock: number;
   time: number;
   logs: RawLog[];
-  opened: string[];
-  due: string[];
-  beat?: boolean;
-  kvError?: string;
 };
 
 // What the sender learned when it asked the contract and was told the call would change nothing.
@@ -96,13 +89,6 @@ export type Health = {
   repeats: number;
   lastBlock: number;
   lastTime: string;
-  /** The Stream's own: this machine's wall time at its last delivery, its last heartbeat's block, and how many deliveries it has made since the keeper started. What the keeper read from the node itself (follow.ts) is not counted here. */
-  lastDeliveryAt: number | null;
-  lastBeatBlock: number | null;
-  /** The newest block a Stream delivery has covered since the keeper started. */
-  streamBlock: number | null;
-  kvError: string | null;
-  deliveries: number;
   sent: number;
   failedSends: number;
   rejected: number; // events that did not fit the ledger and were set aside
@@ -114,47 +100,11 @@ export type Health = {
 
 export type Keeper = {
   readonly ledger: Ledger;
-  /** Take one delivery. `from` says who made it: the Stream (the default), or the keeper's own reading of the node. */
-  deliver(d: Delivery, from?: "stream" | "node"): { applied: number; repeats: number; done: Promise<{ action: Action; result: SendResult }[]> };
+  /** Take one delivery. */
+  deliver(d: Delivery): { applied: number; repeats: number; done: Promise<{ action: Action; result: SendResult }[]> };
   health(): Health;
   feed(limit?: number): BoomerangEvent[]; // the most recent applied events, newest last
 };
-
-/** Throws Error("bad delivery: <why>") unless `value` is a well-formed delivery. */
-export function parseDelivery(value: unknown): Delivery {
-  const bad = (why: string): never => {
-    throw new Error(`bad delivery: ${why}`);
-  };
-  if (value === null || typeof value !== "object") return bad("not an object");
-  const v = value as Record<string, unknown>;
-  if (v.v !== 1) return bad("v");
-  const int = (x: unknown) => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
-  if (!int(v.fromBlock)) return bad("fromBlock");
-  if (!int(v.toBlock)) return bad("toBlock");
-  if (!int(v.time)) return bad("time");
-  if (!Array.isArray(v.logs)) return bad("logs");
-  if (!Array.isArray(v.opened)) return bad("opened");
-  if (!Array.isArray(v.due)) return bad("due");
-  for (const log of v.logs) {
-    if (log === null || typeof log !== "object") return bad("log");
-    const l = log as Record<string, unknown>;
-    if (typeof l.address !== "string") return bad("log address");
-    if (!Array.isArray(l.topics) || !l.topics.every((t) => typeof t === "string")) return bad("log topics");
-    if (typeof l.data !== "string") return bad("log data");
-  }
-  const d: Delivery = {
-    v: 1,
-    fromBlock: v.fromBlock as number,
-    toBlock: v.toBlock as number,
-    time: v.time as number,
-    logs: v.logs as RawLog[],
-    opened: v.opened as string[],
-    due: v.due as string[],
-  };
-  if (typeof v.beat === "boolean") d.beat = v.beat;
-  if (typeof v.kvError === "string") d.kvError = v.kvError;
-  return d;
-}
 
 function shortMessage(e: unknown): string {
   const a = e as { shortMessage?: unknown; message?: unknown } | undefined;
@@ -176,14 +126,12 @@ export function createKeeper(o: {
   timer?: () => bigint;
   // How long the contract must have been saying "open" before a ledger that says "settled" is overruled.
   believeOpenAfter?: bigint;
-  clock?: () => number; // wall time in milliseconds, for display only
 }): Keeper {
   const { boomerang, store, send } = o;
   const resendAfter = o.resendAfter ?? 20n;
   const retryFailedAfter = o.retryFailedAfter ?? 600n;
   const maxTries = o.maxTries ?? 8;
   const believeOpenAfter = o.believeOpenAfter ?? 60n;
-  const clock = o.clock ?? Date.now;
 
   const ledger = emptyLedger();
   const seen = new Map<bigint, BoomerangEvent>(); // events the ledger is holding but has not applied yet, by seq
@@ -212,11 +160,6 @@ export function createKeeper(o: {
 
   let lastTime = 0n; // the keeper's clock: the latest delivery time it has accepted
   let lastBlock = 0;
-  let lastBeatBlock: number | null = null;
-  let lastDeliveryAt: number | null = null;
-  let streamBlock: number | null = null;
-  let kvError: string | null = null;
-  let deliveries = 0;
   let sent = 0;
   let failedSends = 0;
   let rejected = 0;
@@ -383,7 +326,7 @@ export function createKeeper(o: {
             const key = actionKey(action);
             if (over.has(key)) continue;
             // A campaign the contract said it does not have: asked again after resendAfter, then
-            // twice that, and so on up to about a day. A node behind the Stream has it a moment later.
+            // twice that, and so on up to about a day. A node behind the chain's head has it a moment later.
             const gone = absent.get(action.id);
             if (gone !== undefined && waitClock() - gone.at < doubled(resendAfter, gone.count, 12)) continue;
             if (action.kind === "payMany") {
@@ -394,7 +337,7 @@ export function createKeeper(o: {
             if (action.kind === "finalize" && last !== undefined && last.none >= VOID_ASKS) {
               // Before the closing second a finalize is only a guess that a pot is missing. Told
               // "not due" four times, over more than two minutes (longer than a node stays behind
-              // the Stream), the guess is wrong: the pots are in. It is dropped until the closing second.
+              // the chain's head), the guess is wrong: the pots are in. It is dropped until the closing second.
               const closes = ledger.campaigns.get(action.id)?.terms.closesAt;
               if (closes !== undefined && lastTime < closes) continue;
             }
@@ -468,10 +411,7 @@ export function createKeeper(o: {
     return done;
   }
 
-  function deliver(
-    d: Delivery,
-    from: "stream" | "node" = "stream",
-  ): {
+  function deliver(d: Delivery): {
     applied: number;
     repeats: number;
     done: Promise<{ action: Action; result: SendResult }[]>;
@@ -479,27 +419,12 @@ export function createKeeper(o: {
     const t = BigInt(d.time);
 
     // If the store cannot be written this throws, nothing is applied, and the delivery goes
-    // unanswered, so the Stream sends it again.
+    // unanswered. The node reader (follow.ts) counts a fault and reads again on its next tick.
     const { applied, repeats } = take(decodeLogs(d.logs, boomerang), true, t);
 
     if (t > lastTime) lastTime = t;
-    if (from === "node") {
-      // Read from the node by the keeper itself. The ledger, the clock and the newest block move
-      // as for any delivery; the Stream's own counters do not, so /health still says truly when
-      // the Stream last delivered.
-      if (d.toBlock >= lastBlock) lastBlock = d.toBlock;
-    } else {
-      lastDeliveryAt = clock();
-      deliveries += 1;
-      if (streamBlock === null || d.toBlock > streamBlock) streamBlock = d.toBlock;
-      // What /health shows comes from the newest delivery by block, so an old delivery arriving
-      // late does not turn the display back.
-      if (d.toBlock >= lastBlock) {
-        lastBlock = d.toBlock;
-        kvError = d.kvError ?? null;
-        if (d.beat) lastBeatBlock = d.toBlock;
-      }
-    }
+    // What /health shows as the newest block never turns back for a delivery of older blocks.
+    if (d.toBlock >= lastBlock) lastBlock = d.toBlock;
 
     return { applied, repeats, done: runActions() };
   }
@@ -513,11 +438,6 @@ export function createKeeper(o: {
       repeats: ledger.repeats,
       lastBlock,
       lastTime: lastTime.toString(),
-      lastDeliveryAt,
-      lastBeatBlock,
-      streamBlock,
-      kvError,
-      deliveries,
       sent,
       failedSends,
       rejected,

@@ -1,7 +1,7 @@
 // The sender: it turns a planned Action into a real contract call and waits for the receipt.
 //
 // It asks the contract first. The plan comes from the keeper's ledger, and the ledger is built
-// from Stream deliveries that someone holding the Stream's token could forge. So before any gas
+// from deliveries that someone feeding the keeper could forge. So before any gas
 // is spent the sender reads the contract (free) and sends only a call the contract says will
 // change something: a campaign that is still open and due, a side with money to pay, backers who
 // are owed. Anything else comes back as `nothing`, with what the keeper needs to stop asking and
@@ -96,7 +96,7 @@ export function makeSender(o: { publicClient: PublicClient; walletClient: Wallet
       let owedNothing: Address[] = [];
 
       // The ledger may name a campaign the contract does not have: a false event, or a node that
-      // has not caught up with the Stream. That is nothing to send, and not a refusal.
+      // has not caught up with the chain's head. That is nothing to send, and not a refusal.
       let state: { outcome: number };
       try {
         state = (await read({ ...at, functionName: "stateOf", args: [action.id] })) as { outcome: number };
@@ -112,7 +112,7 @@ export function makeSender(o: { publicClient: PublicClient; walletClient: Wallet
         hash = await write({ ...base, functionName: "finalize", args: [action.id] });
       } else if (action.kind === "paySide") {
         // The plan names a side only after the ledger has heard the outcome. If the contract
-        // does not show one, this node is behind the Stream (or the event was false): ask later.
+        // does not show one, this node is behind the chain's head (or the event was false): ask later.
         if (state.outcome === OPEN) return nothing(NOT_SETTLED, { outcome: OPEN });
         // Reverts (refused) while the payee cannot be paid.
         const { result } = await simulate({ ...base, blockNumber: at.blockNumber, functionName: "paySide", args: [action.id, action.side] });

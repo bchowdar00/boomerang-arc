@@ -1,18 +1,14 @@
 // Every amount, address and time in these tests is invented. None is a reading of any real campaign.
 //
 // The deployment and verification scripts, driven against Hardhat's in-memory chain. Each test's
-// outputs (a copy of addresses.json, a deployed filter) go to a fresh temp directory, never into
-// the repo.
+// outputs (a copy of addresses.json) go to a fresh temp directory, never into the repo.
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer as createHttpServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import vm from "node:vm";
 
 import { network } from "hardhat";
 import { encodeAbiParameters, encodeEventTopics, getAbiItem, toFunctionSelector } from "viem";
@@ -25,7 +21,6 @@ import { Outcome, setup, USD } from "./helpers.ts";
 
 const ARTIFACT_URL = new URL("../artifacts/contracts/Boomerang.sol/Boomerang.json", import.meta.url);
 const ADDRESSES_URL = new URL("../../packages/kit/addresses.json", import.meta.url);
-const FILTER_URL = new URL("../../streams/filter.js", import.meta.url);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const BoomerangArtifact: any = JSON.parse(readFileSync(ARTIFACT_URL, "utf8"));
@@ -51,44 +46,8 @@ function flipHexChar(body: string, index: number): string {
   return body.slice(0, index) + other + body.slice(index + 1);
 }
 
-// Run a QuickNode Stream filter source in a vm, the way streams/filter.test.mjs does, with an
-// in-memory Key-Value Store. The source already has its BOOMERANG address set, so no replace.
-function runFilter(source: string, blocks: unknown[]): Promise<{ logs: unknown[] } | null> {
-  const lists = new Map<string, Set<string>>();
-  const qnLib = {
-    async qnGetList(name: string) {
-      return lists.has(name) ? [...lists.get(name)!] : undefined;
-    },
-    async qnUpsertList(name: string, { add_items = [], remove_items = [] }: { add_items?: string[]; remove_items?: string[] }) {
-      const set = lists.get(name) ?? new Set<string>();
-      for (const x of remove_items) set.delete(x);
-      for (const x of add_items) set.add(x);
-      lists.set(name, set);
-    },
-  };
-  const context = vm.createContext({ qnLib, console });
-  vm.runInContext(source, context);
-  const main = vm.runInContext("main", context);
-  return main({ data: blocks });
-}
-
-// One Pledged log, encoded from the Boomerang ABI, at the given address.
-function pledgedLog(address: Address) {
-  const args = { seq: 1n, id: 1n, backer: BACKER, payer: BACKER, amount: 5n * USD, weight: 1_000_000n } as Record<string, unknown>;
-  const topics = encodeEventTopics({ abi: boomerangAbi, eventName: "Pledged", args });
-  const item = getAbiItem({ abi: boomerangAbi, name: "Pledged" }) as unknown as { inputs: (AbiParameter & { indexed?: boolean })[] };
-  const plain = item.inputs.filter((i) => !i.indexed) as AbiParameter[];
-  const data = encodeAbiParameters(plain, plain.map((i) => args[(i as { name: string }).name]));
-  return { address, topics, data, logIndex: "0x0", transactionHash: `0x${"ab".repeat(32)}` };
-}
-
-const block = (number: number, time: number, logs: unknown[] = []) => ({
-  block: { number: `0x${number.toString(16)}`, timestamp: `0x${time.toString(16)}` },
-  receipts: logs.length ? [{ transactionHash: `0x${"cd".repeat(32)}`, logs }] : [],
-});
-
 describe("deploy", function () {
-  it("deploy.outputs: deploys both contracts, updates addresses.json, writes a deployable filter, and records the right deploy block", async function () {
+  it("deploy.outputs: deploys the contracts, updates addresses.json, and records the right deploy block", async function () {
     const { viem } = await network.create();
     const publicClient = await viem.getPublicClient();
     const usdc = await viem.deployContract("TestUSDC");
@@ -98,13 +57,7 @@ describe("deploy", function () {
     const original = readFileSync(ADDRESSES_URL, "utf8");
     writeFileSync(addressesPath, original);
 
-    // A second zero-address literal is added so a global replace would corrupt a second line.
-    const filterSrc = `// example address 0x0000000000000000000000000000000000000000\n${readFileSync(FILTER_URL, "utf8")}`;
-    const filterSource = join(dir, "filter.js");
-    writeFileSync(filterSource, filterSrc);
-    const filterOut = join(dir, "filter.deployed.js");
-
-    const out = await deployAll({ viem, chainId: 99999, usdc: usdc.address, transmitter: TRANSMITTER, messenger: MESSENGER, addressesPath, filterSource, filterOut });
+    const out = await deployAll({ viem, chainId: 99999, usdc: usdc.address, transmitter: TRANSMITTER, messenger: MESSENGER, addressesPath });
 
     // The returned addresses hold code.
     assert.ok(((await publicClient.getCode({ address: out.boomerang })) ?? "0x").length > 2);
@@ -147,44 +100,6 @@ describe("deploy", function () {
     assert.equal((await publicClient.getCode({ address: out.boomerang, blockNumber: deployBlock - 1n })) ?? "0x", "0x", "boomerang has no code the block before");
     assert.ok(((await publicClient.getCode({ address: out.boomerang, blockNumber: deployBlock })) ?? "0x").length > 2, "boomerang has code at its deploy block");
     assert.equal((await publicClient.getCode({ address: out.router, blockNumber: deployBlock })) ?? "0x", "0x", "the router is deployed in a later block");
-
-    // The written filter differs from its source in exactly one line and holds the lowercase address.
-    const outText = readFileSync(filterOut, "utf8");
-    const a = filterSrc.split("\n");
-    const b = outText.split("\n");
-    assert.equal(a.length, b.length);
-    let diffs = 0;
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diffs++;
-    assert.equal(diffs, 1, "exactly one line changed");
-    assert.ok(outText.includes(out.boomerang.toLowerCase()));
-
-    // The deployed filter passes a Boomerang log from that address and ignores it from another.
-    const good = await runFilter(outText, [block(100, 1_000, [pledgedLog(out.boomerang)])]);
-    assert.equal(good?.logs.length, 1);
-    const bad = await runFilter(outText, [block(101, 1_001, [pledgedLog(TRANSMITTER)])]);
-    assert.equal(bad, null);
-  });
-
-  it("deploy.filter.guard: a filter with no placeholder, or with two, throws and leaves addresses.json unchanged", async function () {
-    const { viem } = await network.create();
-    const usdc = await viem.deployContract("TestUSDC");
-    const dir = tmp("boomerang-guard-");
-    const addressesPath = join(dir, "addresses.json");
-    const original = readFileSync(ADDRESSES_URL, "utf8");
-
-    // The filter step is validated before addresses.json is written, so a bad source leaves it as is.
-    async function expectThrow(filterText: string) {
-      writeFileSync(addressesPath, original);
-      const filterSource = join(dir, `src-${Math.random().toString(16).slice(2)}.js`);
-      writeFileSync(filterSource, filterText);
-      await assert.rejects(
-        deployAll({ viem, chainId: 99999, usdc: usdc.address, transmitter: TRANSMITTER, messenger: MESSENGER, addressesPath, filterSource, filterOut: join(dir, "out.js") }),
-      );
-      assert.equal(readFileSync(addressesPath, "utf8"), original, "addresses.json is unchanged");
-    }
-
-    await expectThrow('const BOOMERANG = "0x1111111111111111111111111111111111111111";\n');
-    await expectThrow('const BOOMERANG = "0x0000000000000000000000000000000000000000";\nconst BOOMERANG = "0x0000000000000000000000000000000000000000";\n');
   });
 
   it("deploy.keep: an existing key on this chain's entry, and another chain's entry, survive the write", async function () {
@@ -195,34 +110,14 @@ describe("deploy", function () {
     // Seed this chain with an extra key, plus a second chain that must be left alone.
     const seed = { "99999": { note: "keep me" }, "777": { boomerang: "0xdead", usdc: "0xbeef" } };
     writeFileSync(addressesPath, JSON.stringify(seed, null, 2) + "\n");
-    const filterSource = join(dir, "filter.js");
-    writeFileSync(filterSource, readFileSync(FILTER_URL, "utf8"));
 
-    await deployAll({ viem, chainId: 99999, usdc: usdc.address, transmitter: TRANSMITTER, messenger: MESSENGER, addressesPath, filterSource, filterOut: join(dir, "out.js") });
+    await deployAll({ viem, chainId: 99999, usdc: usdc.address, transmitter: TRANSMITTER, messenger: MESSENGER, addressesPath });
 
     const written = JSON.parse(readFileSync(addressesPath, "utf8"));
     assert.equal(written["99999"].note, "keep me", "the extra key on this chain's entry is kept");
     assert.deepEqual(written["777"], seed["777"], "the other chain's entry is untouched");
   });
 
-  it("deploy.order: a filter write into a missing directory rejects and leaves addresses.json byte-for-byte", async function () {
-    const { viem } = await network.create();
-    const usdc = await viem.deployContract("TestUSDC");
-    const dir = tmp("boomerang-order-");
-    const addressesPath = join(dir, "addresses.json");
-    const before = readFileSync(ADDRESSES_URL, "utf8");
-    writeFileSync(addressesPath, before);
-    const filterSource = join(dir, "filter.js");
-    writeFileSync(filterSource, readFileSync(FILTER_URL, "utf8"));
-
-    // The filter is written before addresses.json. Point it at a directory that does not exist so
-    // the filter write fails first; addresses.json must then be exactly as it was.
-    const filterOut = join(dir, "no-such-dir", "out.js");
-    await assert.rejects(
-      deployAll({ viem, chainId: 99999, usdc: usdc.address, transmitter: TRANSMITTER, messenger: MESSENGER, addressesPath, filterSource, filterOut }),
-    );
-    assert.equal(readFileSync(addressesPath, "utf8"), before, "addresses.json is byte-for-byte unchanged");
-  });
 });
 
 describe("checkLive", function () {
@@ -1054,48 +949,59 @@ describe("cli scripts", function () {
     assert.doesNotMatch(src, /usdc:\s*(raw|addresses)\./);
   });
 
-  it("localstream.noredirect: a local node that answers 'go elsewhere' is not followed", async function () {
-    // In the source, with comments taken out, both fetch calls refuse redirects.
-    const src = readFileSync(new URL("../../scripts/local-stream.mjs", import.meta.url), "utf8")
-      .split("\n")
-      .map((l) => l.replace(/\/\*.*?\*\//g, "").replace(/\/\/.*$/, ""))
-      .join("\n");
-    const fetchLines = src.split("\n").filter((l) => /fetch\s*\(/.test(l));
-    assert.equal(fetchLines.length, 2, "two fetch calls");
-    for (const line of fetchLines) {
-      assert.match(line, /redirect:\s*"error"/, `fetch refuses redirects: ${line.trim()}`);
-      assert.doesNotMatch(line, /redirect:\s*"(follow|manual)"/);
+  it("crosschain.exit: the cross-chain pledge script says what it was not told and exits 2 before it asks any network or reads any key", function () {
+    const run = (env: Record<string, string>, args: string[] = []) =>
+      spawnSync("node", ["scripts/cross-chain-pledge.mjs", ...args], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        // Nodes that do not exist: a script that asked one would fail with exit 1, not 2.
+        env: { PATH: process.env.PATH ?? "", SOURCE_RPC_URL: "http://127.0.0.1:1", ARC_RPC_URL: "http://127.0.0.1:1", ...env },
+      });
+    const cases: [Record<string, string>, string[], RegExp][] = [
+      [{}, [], /^CAMPAIGN must be the campaign's number/],
+      [{ CAMPAIGN: "twelve" }, [], /^CAMPAIGN must be the campaign's number/],
+      [{ CAMPAIGN: "12", AMOUNT: "-1" }, [], /^AMOUNT must be a USDC amount/],
+      [{ CAMPAIGN: "12", AMOUNT: "0" }, [], /^AMOUNT must be more than zero/],
+      [{ CAMPAIGN: "12", SOURCE: "mainnet" }, [], /^SOURCE must be base-sepolia or sepolia/],
+      [{ CAMPAIGN: "12", SPEED: "instant" }, [], /^SPEED must be fast or standard/],
+      [{ CAMPAIGN: "12", BURN_TX: "0x12" }, [], /^BURN_TX is not a transaction hash/],
+      [{ CAMPAIGN: "12", BACKER: "me" }, [], /^BACKER is not an address/],
+      [{ CAMPAIGN: "12" }, [], /^give PLEDGER_KEY_FILE, or PLEDGER_ADDRESS to look without sending/],
+      [{ CAMPAIGN: "12", PLEDGER_ADDRESS: "0x00000000000000000000000000000000000000c1" }, ["--send"], /^--send needs PLEDGER_KEY_FILE/],
+      [{ CAMPAIGN: "12", PLEDGER_KEY_FILE: "/no/such/file" }, ["--send"], /^PLEDGER_KEY_FILE could not be read/],
+      [{ CAMPAIGN: "12", PLEDGER_ADDRESS: "0x00000000000000000000000000000000000000c1" }, ["--now"], /^unknown argument --now/],
+    ];
+    for (const [env, args, want] of cases) {
+      const res = run(env, args);
+      assert.equal(res.status, 2, JSON.stringify([env, args, res.stderr]));
+      assert.match(res.stderr, want);
+      assert.equal(res.stdout, "");
     }
 
-    // And in fact: a node on this machine that redirects every request. The other server must never be asked.
-    let elsewhere = 0;
-    let asked = 0;
-    const other = createHttpServer((_req, res) => {
-      elsewhere += 1;
-      res.end("{}");
-    });
-    await new Promise<void>((r) => other.listen(0, "127.0.0.1", r));
-    const otherPort = (other.address() as AddressInfo).port;
-    const node = createHttpServer((_req, res) => {
-      asked += 1;
-      res.writeHead(307, { location: `http://127.0.0.1:${otherPort}/` });
-      res.end();
-    });
-    await new Promise<void>((r) => node.listen(0, "127.0.0.1", r));
-    const nodePort = (node.address() as AddressInfo).port;
-    const child = spawn("node", ["scripts/local-stream.mjs"], {
-      cwd: repoRoot,
-      env: { ...process.env, RPC_URL: `http://127.0.0.1:${nodePort}`, KEEPER_URL: `http://127.0.0.1:${nodePort}/stream`, BOOMERANG_ADDRESS: "0x00000000000000000000000000000000000000b1", STREAM_SECURITY_TOKEN: "invented", EVERY_MS: "50" },
-      stdio: "ignore",
-    });
-    try {
-      for (let i = 0; i < 100 && asked < 3; i++) await new Promise((r) => setTimeout(r, 50));
-    } finally {
-      child.kill();
-      await new Promise<void>((r) => node.close(() => r()));
-      await new Promise<void>((r) => other.close(() => r()));
+    // A key file that does not hold a key is refused without its text being repeated.
+    const dir = tmp("boomerang-crosschain-");
+    const bad = join(dir, "key");
+    writeFileSync(bad, "not-a-key-but-secret-looking-text\n");
+    const res = run({ CAMPAIGN: "12", PLEDGER_KEY_FILE: bad }, ["--send"]);
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /^PLEDGER_KEY_FILE does not hold one private key in hex/);
+    assert.doesNotMatch(res.stderr + res.stdout, /secret-looking/);
+
+    // Sixty-four hex digits that are not a usable key (invented: all zeros, and all f, which is
+    // past the curve's order) are refused the same way: no stack, and none of the digits.
+    for (const digits of ["0".repeat(64), "f".repeat(64)]) {
+      writeFileSync(bad, `${digits}\n`);
+      const out = run({ CAMPAIGN: "12", PLEDGER_KEY_FILE: bad }, ["--send"]);
+      assert.equal(out.status, 2, out.stderr);
+      assert.match(out.stderr, /^PLEDGER_KEY_FILE holds 64 hex digits that are not a usable private key/);
+      assert.equal(out.stderr.trim().split("\n").length, 1);
+      assert.doesNotMatch(out.stderr + out.stdout, /0{20}|f{20}|1157920892/);
     }
-    assert.ok(asked >= 3, "the script kept asking its node");
-    assert.equal(elsewhere, 0, "and never went where the node pointed");
+
+    // Told enough, it does ask the network: with nodes that do not exist it fails (1) and shows no address.
+    const asked = run({ CAMPAIGN: "12", PLEDGER_ADDRESS: "0x00000000000000000000000000000000000000c1" });
+    assert.equal(asked.status, 1);
+    assert.match(asked.stderr, /^failed: /);
+    assert.doesNotMatch(asked.stderr, /127\.0\.0\.1/);
   });
 });

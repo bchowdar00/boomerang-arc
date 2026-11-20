@@ -1,12 +1,10 @@
-// The follower: the keeper's own reading of the node, for when the Stream is silent.
+// The follower: the keeper's reading of Arc's node, and its only source of events.
 //
-// The keeper acts only when it is handed a delivery. The QuickNode Stream hands it one for every
-// block that matters and a heartbeat every 300 blocks. If the Stream stops (it did on
-// 2026-11-18, when its plan's credits ran out), nothing would be settled until someone pressed a
-// button. So when no Stream delivery has come for `quietMs`, the follower asks the node two
-// small things every few seconds: the newest block, and Boomerang's logs since the last block
-// the keeper heard. It hands them to the keeper as one delivery in the filter's own shape, down
-// the same path, so the ledger, the plan and the sender behave exactly as they do for the Stream.
+// The keeper acts only when it is handed a delivery: the event logs of a run of blocks, and a
+// time. The follower asks the node two small things every few seconds: the newest block, and
+// Boomerang's logs since the last block the keeper heard. It hands them to the keeper as one
+// delivery. With no new block there are no logs to hand over, but the keeper is still told the
+// time, so a call it put off is tried again.
 //
 // It reads in small steps and keeps its place. A public node refuses a caller that asks too
 // much at once (Arc's did, in a test on 2026-11-18, after a few dozen log requests in a row).
@@ -15,23 +13,16 @@
 // that does not reach the newest block carries only the time of its own newest log, so the
 // keeper's clock never runs ahead of what it has been told.
 //
-// The Stream stays the first source. While it delivers, the node is not asked anything. When it
-// starts again the follower goes on until it has read up to the newest block and past the
-// Stream's own, so no block falls between the node's last read and the Stream's first delivery,
-// and then stops.
-//
 // It also mends a hole. If an event number is missing from the ledger for `healAfterMs`
-// (whichever source lost it), the follower reads again from the contract's first block, once
+// (whichever read lost it), the follower reads again from the contract's first block, once
 // for that hole, one log request a tick beside the reading of new blocks. Events the ledger
 // already has are counted as repeats and change nothing. If a request for the hole fails, new
 // blocks are still read, and the hole is taken up again from where it was after twice the wait,
 // then four times, up to 64. A hole still there 64 waits after its read finished (the node may
 // have been behind) is read for once more.
 //
-// What it does not do: it does not run streams/filter.js, keeps no Key-Value Store, and sends no
-// `opened` or `due` hints. The keeper never needed them: it reads deadlines from its own ledger.
-// It reads up to the node's newest block and trusts the node's logs as it trusts the Stream's;
-// either way the sender asks the contract before it spends anything.
+// It keeps no store of its own. It reads up to the node's newest block and trusts the node's
+// logs; the sender asks the contract before it spends anything.
 //
 // A node's error text is never kept or printed: an RPC address can carry a key.
 import type { Address, RawLog } from "../../../packages/kit/src/index.ts";
@@ -44,8 +35,6 @@ export type Node = {
 };
 
 export type FollowState = {
-  /** Whether the Stream is silent and the node is being read in its place. */
-  following: boolean;
   /** Deliveries handed to the keeper from the node since the keeper started. */
   reads: number;
   /** This machine's wall time at the last of them, in milliseconds. */
@@ -63,8 +52,6 @@ export function createFollower(o: {
   node: Node;
   /** The block the contract was created in: no read starts below it. */
   startBlock: bigint;
-  /** How long the Stream may be silent before the node is read. Default five minutes: two of its heartbeats. */
-  quietMs?: number;
   /** How many blocks one logs call covers. Default 10,000, the most Arc's node takes in one call. */
   span?: bigint;
   /** How many logs calls one read of new blocks may make. Default two. */
@@ -72,10 +59,8 @@ export function createFollower(o: {
   /** How long an event number may be missing before the node is read from the contract's first block. Default one minute. */
   healAfterMs?: number;
   clock?: () => number;
-  log?: (line: string) => void;
 }): Follower {
-  const { keeper, node, startBlock, log } = o;
-  const quietMs = o.quietMs ?? 300_000;
+  const { keeper, node, startBlock } = o;
   const span = o.span ?? 10_000n;
   const perRead = BigInt(o.perRead ?? 2);
   const healAfterMs = o.healAfterMs ?? 60_000;
@@ -84,9 +69,8 @@ export function createFollower(o: {
   if (perRead < 1n) throw new Error("a read must make at least one call");
 
   let busy = false;
-  /** The next block to read, while the node is being followed; null while the Stream feeds the keeper. */
+  /** The next block to read; null until the first read, which starts after the last block the keeper's store has heard. */
   let next: bigint | null = null;
-  let following = false;
   let reads = 0;
   let lastReadAt: number | null = null;
   let readTo: number | null = null;
@@ -95,12 +79,6 @@ export function createFollower(o: {
   // of the read for it, whether that read is done, and how many of its requests have failed.
   let gap: { from: string; since: number; at: bigint; read: boolean; tries: number; doneAt: number | null } | null = null;
   const newGap = (from: string, since: number): NonNullable<typeof gap> => ({ from, since, at: startBlock, read: false, tries: 0, doneAt: null });
-
-  const say = (now: boolean): void => {
-    if (now === following) return;
-    following = now;
-    if (log) log(now ? "the Stream is silent: reading the node" : "the Stream is delivering again: handing back to it");
-  };
 
   // The logs of a range, a span at a call. Nothing is handed over unless every call got through.
   async function gather(from: bigint, to: bigint): Promise<RawLog[]> {
@@ -116,11 +94,10 @@ export function createFollower(o: {
   // only moves forward, takes no notice of.
   const newest = (logs: RawLog[]): bigint => logs.reduce((t, l) => (l.blockTimestamp != null && BigInt(l.blockTimestamp) > t ? BigInt(l.blockTimestamp) : t), 0n);
 
-  // One delivery in the filter's own shape, marked as a heartbeat: the blocks `from` to `to`, and
-  // the time to tell the keeper. If the store cannot be written `deliver` throws and nothing was applied.
+  // One delivery: the blocks `from` to `to`, their logs, and the time to tell the keeper. If the store cannot be written `deliver` throws and nothing was applied.
   function hand(from: bigint, to: bigint, time: bigint, logs: RawLog[]): void {
-    const delivery: Delivery = { v: 1, fromBlock: Number(from <= to ? from : to), toBlock: Number(to), time: Number(time), logs, opened: [], due: [], beat: true };
-    keeper.deliver(delivery, "node").done.catch(() => {}); // a sender fault is reported through /health, never thrown here
+    const delivery: Delivery = { fromBlock: Number(from <= to ? from : to), toBlock: Number(to), time: Number(time), logs };
+    keeper.deliver(delivery).done.catch(() => {}); // a sender fault is reported through /health, never thrown here
     reads += 1;
     lastReadAt = clock();
     if (readTo === null || delivery.toBlock > readTo) readTo = delivery.toBlock;
@@ -132,7 +109,6 @@ export function createFollower(o: {
     try {
       const h = keeper.health();
       const now = clock();
-      const quiet = h.lastDeliveryAt === null || now - h.lastDeliveryAt >= quietMs;
 
       if (h.missing === null) gap = null;
       else if (gap === null) gap = newGap(h.missing.from, now);
@@ -149,37 +125,24 @@ export function createFollower(o: {
       // A request for a hole that failed is tried again after twice the wait, then four times, up to 64.
       const heal = gap !== null && !gap.read && now - gap.since >= healAfterMs * 2 ** Math.min(gap.tries, 6);
 
-      if (!quiet && next === null && !heal) {
-        say(false);
-        return;
-      }
-      say(quiet);
-
       const head = await node.head();
 
       // The new blocks: from the place kept, or the block after the last one the keeper heard,
       // as far as `perRead` calls reach.
-      if (quiet || next !== null) {
+      {
         const keptPlace = next ?? BigInt(h.lastBlock) + 1n;
         const from = keptPlace < startBlock ? startBlock : keptPlace;
         const reach = from + span * perRead - 1n;
         const to = reach < head.number ? reach : head.number;
         const logs = await gather(from, to);
         // With no new block there is nothing to ask for, but the keeper is still handed the time,
-        // so a call it put off is tried again as it would be at a heartbeat.
+        // so a call it put off is tried again.
         const reached = to >= head.number;
         hand(from, to, reached ? head.time : newest(logs), logs);
+        // The place never goes back: a node behind the keeper's last block is not asked again
+        // for blocks the keeper has already heard.
         const after = to + 1n;
-        if (quiet || !reached || (h.streamBlock !== null && head.number < BigInt(h.streamBlock))) {
-          // Still the keeper's source; or the Stream is back, and the blocks up to the newest
-          // (and up to the Stream's own, if this node is behind it) are still the node's to read.
-          // The place never goes back: a node behind the keeper's last block is not asked again
-          // for blocks the keeper has already heard.
-          next = after > from ? after : from;
-        } else {
-          // That was the last read: the Stream has the chain from here.
-          next = null;
-        }
+        next = after > from ? after : from;
       }
 
       // The hole: one call a tick from its own place, handed over as a delivery of its own, so
@@ -212,7 +175,7 @@ export function createFollower(o: {
 
   return {
     tick,
-    state: () => ({ following, reads, lastReadAt, readTo, faults }),
+    state: () => ({ reads, lastReadAt, readTo, faults }),
   };
 }
 

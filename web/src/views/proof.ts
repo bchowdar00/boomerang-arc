@@ -2,7 +2,7 @@
 //
 // Three things are set side by side. The contract's own figures, read at one block. A second
 // ledger the keeper rebuilt from nothing but the contract's events as the keeper received them.
-// And the Stream's own pulse. Only the first is the truth about the money; the other two are
+// And the keeper's own pulse. Only the first is the truth about the money; the other two are
 // there to be compared with it, and the page says plainly when they are late, absent or wrong.
 import type { Address } from "../../../packages/kit/src/index.ts";
 import { Outcome } from "../../../packages/kit/src/index.ts";
@@ -27,8 +27,8 @@ export type ProofPage = {
     /** Each disagreement, in words; empty unless the state is "differs". */
     differences: string[];
   };
-  /** The Stream's pulse as the keeper reports it; null when the keeper cannot be reached. */
-  stream: Row[] | null;
+  /** The keeper's pulse as it reports it: what feeds it and what it has done; null when it cannot be reached. */
+  keeper: Row[] | null;
   /** Things the keeper itself reported going wrong, newest last, as plain text. */
   keeperErrors: string[];
   facts: Row[];
@@ -86,19 +86,16 @@ const numbers = (ids: readonly bigint[]): string =>
 
 const KEEPER_DOWN = "The keeper cannot be reached, so the second ledger is not shown. The contract's figures above do not depend on it.";
 
-// What the keeper's table says it is fed by, from the pace and, for the node case, the last Stream
-// delivery. "down" cannot happen with a health present; it is covered so the row is never empty.
-function fedBy(h: HealthView, pace: Pace): string {
+// What the keeper's table says it is fed by. The keeper hears the chain one way, by reading
+// Arc's node itself. "down" cannot happen with a health present; it is covered so the row is never empty.
+function fedBy(pace: Pace): string {
   if (pace.state === "down") return "The keeper did not answer at this read.";
   if (pace.state === "behind") {
     return pace.heard === 0
       ? "Nothing yet. The keeper has heard no block since it started."
       : `Nothing right now. The keeper last heard block ${pace.heard}, ${pace.blocks} blocks behind the chain.`;
   }
-  if (pace.by === "stream") return "The QuickNode Stream";
-  return h.lastDeliveryAt === null
-    ? "Arc's node, read by the keeper itself. The Stream has delivered nothing since the keeper started."
-    : `Arc's node, read by the keeper itself. The Stream's last delivery was ${utcStamp(BigInt(Math.floor(h.lastDeliveryAt / 1000)))}.`;
+  return "Arc's node, read by the keeper itself.";
 }
 
 export function proofPage(o: {
@@ -203,15 +200,12 @@ export function proofPage(o: {
   }
 
   const h = o.health;
-  const stream: Row[] | null =
+  const keeper: Row[] | null =
     h === null
       ? null
       : [
-          { label: "Fed by", value: fedBy(h, o.pace) },
+          { label: "Fed by", value: fedBy(o.pace) },
           { label: "Newest block heard", value: String(h.lastBlock) },
-          { label: "Stream deliveries taken since the keeper started", value: String(h.deliveries) },
-          { label: "Last Stream delivery", value: h.lastDeliveryAt === null ? "None yet" : utcStamp(BigInt(Math.floor(h.lastDeliveryAt / 1000))) },
-          { label: "Last Stream heartbeat", value: h.lastBeatBlock === null ? "None yet" : `Block ${h.lastBeatBlock}` },
           ...(h.node !== null
             ? [{ label: "Node reads since the keeper started", value: h.node.faults === 0 ? String(h.node.reads) : `${h.node.reads}, and ${h.node.faults} that failed` }]
             : []),
@@ -220,14 +214,13 @@ export function proofPage(o: {
           { label: "Campaigns in the events that the contract does not have (or not yet)", value: numbers(h.absent) },
           { label: "Calls sent", value: `${h.sent} went through, ${h.failedSends} did not` },
           { label: "Calls given up on", value: h.gaveUp.length === 0 ? "None" : String(h.gaveUp.length) },
-          { label: "Stream store", value: h.kvError === null ? "No fault reported" : `Fault reported: ${h.kvError}` },
           { label: "Every settled campaign fully paid, by the keeper's ledger", value: h.settled ? "Yes" : "Not yet" },
         ];
 
   return {
     custody,
     second,
-    stream,
+    keeper,
     keeperErrors: h === null ? [] : h.lastErrors,
     facts: [
       { label: "Contract", value: short(o.where.boomerang), address: o.where.boomerang },

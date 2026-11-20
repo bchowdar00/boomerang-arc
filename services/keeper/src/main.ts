@@ -1,7 +1,7 @@
 // The keeper's entry point. It reads its settings from the environment, opens the store, builds
 // the keeper (watch-only without a key, a signer with one), optionally stands up the demo desk,
-// and serves. The token and the private key are read once and then wiped from the process's own
-// environment; they are never logged and never written.
+// and serves. The private key is read once and then wiped from the process's own environment; it
+// is never logged and never written.
 //
 // Not to be run against any live network from a review session: it talks to a real RPC.
 import { createPublicClient, createWalletClient, http } from "viem";
@@ -21,7 +21,7 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-// The settings are read, and the two secrets are wiped from the environment before anything
+// The settings are read, and the private key is wiped from the environment before anything
 // else happens, including before the process exits on a bad setting.
 let settings: Settings | undefined;
 let problem: string | undefined;
@@ -31,10 +31,9 @@ try {
   // Only the settings' own fixed messages are printed; anything else could carry a value.
   problem = e instanceof SettingsError ? e.message : "the keeper's settings could not be read";
 }
-delete process.env.STREAM_SECURITY_TOKEN;
 delete process.env.KEEPER_PRIVATE_KEY;
 if (settings === undefined) fail(problem ?? "the keeper's settings could not be read");
-const { secret, chain, rpcUrl, boomerang, usdc, port, dataDir } = settings;
+const { chain, rpcUrl, boomerang, usdc, port, dataDir } = settings;
 
 const store = openStore(dataDir);
 const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
@@ -79,9 +78,8 @@ if (walletClient && settings.signedPledge) {
   relay = createRelay({ publicClient, walletClient, signedPledge: settings.signedPledge, usdc, queue, timer: () => BigInt(Math.floor(performance.now() / 1000)) });
 }
 
-// The keeper's own reading of the node, for when the Stream is silent: every five seconds it
-// looks whether the Stream has delivered lately and, if not, reads the newest block and the
-// contract's logs itself. A tick never throws and never overlaps the one before.
+// The keeper's reading of the node, its only source of events: every five seconds it reads the
+// newest block and the contract's logs. A tick never throws and never overlaps the one before.
 const FOLLOW_EVERY_MS = 5_000;
 let follower: Follower | undefined;
 if (settings.followNode) {
@@ -92,14 +90,13 @@ if (settings.followNode) {
     keeper,
     node: nodeFrom((args) => followClient.request(args as never) as Promise<unknown>, boomerang),
     startBlock: settings.deployBlock,
-    log: (line) => console.log(line),
   });
   const running = follower;
   void running.tick(); // at once: a keeper that has just started has heard nothing since its store was written
   setInterval(() => void running.tick(), FOLLOW_EVERY_MS);
 }
 
-const server = createServer({ keeper, secret, desk, relay, follower, log: (line) => console.log(line) });
+const server = createServer({ keeper, desk, relay, follower, log: (line) => console.log(line) });
 server.listen(port, settings.host, () => {
   console.log(
     `keeper on ${settings.host}:${port} chain ${chain.id}${settings.local ? " (local)" : ""} boomerang ${boomerang} signer ${signer} desk ${desk ? "on" : "off"} relay ${relay ? "on" : "off"} node-follow ${follower ? "on" : "off"}`,

@@ -12,7 +12,6 @@ import { defineChain, isAddress, type Chain } from "viem";
 import { addressesFor, arcTestnet, type Address } from "../../../packages/kit/src/index.ts";
 
 export type Settings = {
-  secret: string;
   /** The signer's private key as given, or null for a keeper that only watches. */
   key: string | null;
   chain: Chain;
@@ -27,7 +26,7 @@ export type Settings = {
   demoRecipient: Address | null;
   /** SignedPledge, the helper the relay submits one-signature pledges through; null turns the relay off. */
   signedPledge: Address | null;
-  /** Whether the keeper reads the node itself when the Stream is silent (follow.ts). On unless FOLLOW_NODE=off. */
+  /** Whether the keeper reads Arc's node (follow.ts), its only source of events. On unless FOLLOW_NODE=off, which leaves a keeper that relays pledges and runs the desk but settles nothing. */
   followNode: boolean;
   /** The block the contract was created in, where its events start: DEPLOY_BLOCK when given, else the kit's record on Arc and 0 on a local chain. */
   deployBlock: bigint;
@@ -69,9 +68,6 @@ export function settingsFrom(
   env: Env,
   deployed: (chainId: number) => { boomerang: Address; usdc: Address; signedPledge?: Address | null; deployBlock?: bigint | null } = addressesFor,
 ): Settings {
-  const secret = given(env, "STREAM_SECURITY_TOKEN");
-  if (!secret) throw new SettingsError("STREAM_SECURITY_TOKEN is required");
-
   const idText = given(env, "CHAIN_ID") ?? String(arcTestnet.id);
   if (!/^[0-9]{1,9}$/.test(idText)) throw new SettingsError("CHAIN_ID is not a chain id");
   const id = Number(idText);
@@ -116,7 +112,7 @@ export function settingsFrom(
   if (follow !== "on" && follow !== "off") throw new SettingsError("FOLLOW_NODE must be on or off");
   // Arc is tens of millions of blocks long: a read that starts from block 0 would never end.
   if (deployBlock === undefined) {
-    if (follow === "on") throw new SettingsError("DEPLOY_BLOCK is required to read the node for this contract (or set FOLLOW_NODE=off)");
+    if (follow === "on") throw new SettingsError("DEPLOY_BLOCK is required to read the node for this contract");
     deployBlock = 0n;
   }
 
@@ -129,7 +125,6 @@ export function settingsFrom(
   if (isIP(host) === 0) throw new SettingsError("HOST is not an IP address");
 
   return {
-    secret,
     key: given(env, "KEEPER_PRIVATE_KEY") ?? null,
     chain,
     rpcUrl,

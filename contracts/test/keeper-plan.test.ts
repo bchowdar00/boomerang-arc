@@ -14,7 +14,7 @@ import { BATCH, nextActions, settled, type Action } from "../../services/keeper/
 
 type Setup = Awaited<ReturnType<typeof setup>>;
 
-/** Every Boomerang log so far, with its block's time, as the Stream would deliver it. */
+/** Every Boomerang log so far, with its block's time, in the shape a delivery carries. */
 async function ledgerOf(w: Setup): Promise<Ledger> {
   const logs = await w.publicClient.getLogs({ address: w.boomerang.address, fromBlock: 0n });
   const raw: RawLog[] = [];

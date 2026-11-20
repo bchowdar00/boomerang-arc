@@ -1,6 +1,5 @@
 // Every secret, address and payload in these tests is invented. None is a reading of any campaign.
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
 import { connect, type AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import { gzipSync } from "node:zlib";
@@ -12,9 +11,6 @@ import type { Desk, DeskResult } from "../src/demo.ts";
 import type { Relay, RelayResult } from "../src/relay.ts";
 import { applyEvents, emptyLedger, type Address, type BoomerangEvent, type Terms } from "../../../packages/kit/src/index.ts";
 
-const secret = "server-secret-invented";
-const sign = (n: string, t: string, b: string) => createHmac("sha256", Buffer.from(secret)).update(n + t + b).digest("hex");
-
 const DESK_ADDR = "0xDe5c0000000000000000000000000000000000De" as Address;
 
 const health: Health = {
@@ -24,11 +20,6 @@ const health: Health = {
   repeats: 0,
   lastBlock: 0,
   lastTime: "0",
-  lastDeliveryAt: null,
-  lastBeatBlock: null,
-  streamBlock: null,
-  kvError: null,
-  deliveries: 0,
   sent: 0,
   failedSends: 0,
   rejected: 0,
@@ -74,10 +65,10 @@ const fakeRelay: Relay = {
   },
 };
 
-type ServerOpts = { keeper: Keeper; secret?: string; desk?: Desk; relay?: Relay; follower?: { state: () => FollowState }; maxBody?: number; maxHeld?: number; bodyDeadlineMs?: number };
+type ServerOpts = { keeper: Keeper; desk?: Desk; relay?: Relay; follower?: { state: () => FollowState }; maxHeld?: number; bodyDeadlineMs?: number };
 
 async function withServer<T>(opts: ServerOpts, fn: (url: string) => Promise<T>): Promise<T> {
-  const server = createServer({ keeper: opts.keeper, secret: opts.secret ?? secret, desk: opts.desk, relay: opts.relay, follower: opts.follower, maxBody: opts.maxBody, maxHeld: opts.maxHeld, bodyDeadlineMs: opts.bodyDeadlineMs });
+  const server = createServer({ keeper: opts.keeper, desk: opts.desk, relay: opts.relay, follower: opts.follower, maxHeld: opts.maxHeld, bodyDeadlineMs: opts.bodyDeadlineMs });
   await new Promise<void>((r) => server.listen(0, r));
   const { port } = server.address() as AddressInfo;
   try {
@@ -87,147 +78,33 @@ async function withServer<T>(opts: ServerOpts, fn: (url: string) => Promise<T>):
   }
 }
 
-const delivery: Delivery = { v: 1, fromBlock: 1, toBlock: 1, time: 1_794_700_000, logs: [], opened: [], due: [] };
-const deliveryText = JSON.stringify(delivery);
-
-function streamHeaders(nonce: string, timestamp: string, signature: string, extra: Record<string, string> = {}): Record<string, string> {
-  return { "content-type": "application/json", "x-qn-nonce": nonce, "x-qn-timestamp": timestamp, "x-qn-signature": signature, ...extra };
-}
-
 describe("keeper server", function () {
-  it("refuses a wrong signature with 401 and never calls the keeper", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper }, async (url) => {
-      const res = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", "other")), body: deliveryText });
-      assert.equal(res.status, 401);
-      assert.equal(calls.length, 0);
-    });
-  });
-
-  it("refuses a missing or over-long header with 401", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper }, async (url) => {
-      const long = "a".repeat(129);
-      const res1 = await fetch(url + "/stream", { method: "POST", headers: { "content-type": "application/json", "x-qn-timestamp": "1", "x-qn-signature": sign("n", "1", deliveryText) }, body: deliveryText });
-      assert.equal(res1.status, 401);
-      const res2 = await fetch(url + "/stream", { method: "POST", headers: streamHeaders(long, "1", sign(long, "1", deliveryText)), body: deliveryText });
-      assert.equal(res2.status, 401);
-      assert.equal(calls.length, 0);
-    });
-  });
-
-  it("accepts a correct signature with 200 and passes the parsed delivery", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper }, async (url) => {
-      const res = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", deliveryText)), body: deliveryText });
-      assert.equal(res.status, 200);
-      assert.deepEqual(await res.json(), { applied: 2, repeats: 1 });
-      assert.equal(calls.length, 1);
-      assert.deepEqual(calls[0], delivery);
-      assert.equal(res.headers.get("access-control-allow-origin"), null); // /stream has no CORS
-    });
-  });
-
-  it("accepts a gzip body signed over its plain text", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper }, async (url) => {
-      const gz = gzipSync(Buffer.from(deliveryText));
-      const res = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", deliveryText), { "content-encoding": "gzip" }), body: gz });
-      assert.equal(res.status, 200);
-      assert.equal(calls.length, 1);
-    });
-  });
-
-  it("refuses a body over maxBody with 413", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper, maxBody: 50 }, async (url) => {
-      const big = "x".repeat(200);
-      const res = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", big)), body: big });
-      assert.equal(res.status, 413);
-      assert.equal(calls.length, 0);
-    });
-  });
-
-  it("refuses signed non-JSON with 400, and signed JSON that is not a delivery with 400", async function () {
+  it("server.gzip: a gzip-compressed JSON body, even correctly labelled, is not unpacked: /relay and /demo/usdc answer 400 and never reach the relay or the desk", async function () {
     const { keeper } = fakeKeeper();
-    await withServer({ keeper }, async (url) => {
-      const notJson = "not json at all";
-      const r1 = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", notJson)), body: notJson });
-      assert.equal(r1.status, 400);
-      const notDelivery = JSON.stringify({ hello: "world" });
-      const r2 = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", notDelivery)), body: notDelivery });
-      assert.equal(r2.status, 400);
+    const deskCalls: string[] = [];
+    const relayCalls: unknown[] = [];
+    const desk: Desk = { ...fakeDesk, giveUsdc: async (to) => (deskCalls.push(to), { ok: true, hash: "0xfeed" }) };
+    const relay: Relay = { ...fakeRelay, relay: async (body) => (relayCalls.push(body), { ok: true, hash: "0xbeef" }) };
+    await withServer({ keeper, desk, relay }, async (url) => {
+      // Valid JSON before packing; the bytes on the wire are gzip, which the server reads as UTF-8 and cannot parse.
+      const packed = gzipSync(Buffer.from(JSON.stringify({ address: "0xok", id: "1" })));
+      const headers = { "content-type": "application/json", "content-encoding": "gzip" };
+      const usdc = await fetch(url + "/demo/usdc", { method: "POST", headers, body: packed });
+      assert.equal(usdc.status, 400);
+      const r = await fetch(url + "/relay", { method: "POST", headers, body: packed });
+      assert.equal(r.status, 400);
+      assert.deepEqual([deskCalls, relayCalls], [[], []]);
     });
   });
 
-  it("checks the signature before it reads the body: unsigned text that is not JSON gets 401, not 400", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper }, async (url) => {
-      const res = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", "0".repeat(64)), body: "not json at all" });
-      assert.equal(res.status, 401);
-      assert.equal(calls.length, 0);
-    });
-  });
-
-  it("refuses an empty body with 401 even when its signature is correct", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper }, async (url) => {
-      const res = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", "")), body: "" });
-      assert.equal(res.status, 401);
-      assert.equal(calls.length, 0);
-    });
-  });
-
-  it("holds a compressed body to maxBody once unpacked, whatever its signature", async function () {
-    const plain = "x".repeat(100_000); // 100 kB of text that packs into a few hundred bytes
-    const gz = gzipSync(Buffer.from(plain));
-    assert.ok(gz.length < 2000);
-    const headers = streamHeaders("n", "1", sign("n", "1", plain), { "content-encoding": "gzip" });
-    const small = fakeKeeper();
-    await withServer({ keeper: small.keeper, maxBody: 2000 }, async (url) => {
-      const res = await fetch(url + "/stream", { method: "POST", headers, body: gz });
-      assert.equal(res.status, 401);
-      assert.equal(small.calls.length, 0);
-    });
-    // With room to unpack, the same request gets as far as "this is not JSON": the cap is what refused it.
-    const roomy = fakeKeeper();
-    await withServer({ keeper: roomy.keeper, maxBody: 200_000 }, async (url) => {
-      const res = await fetch(url + "/stream", { method: "POST", headers, body: gz });
+  it("server.demoBodyLimit: a demo body larger than the route's limit is refused before the keeper or desk is reached", async function () {
+    // /demo/usdc caps a body at 1 KiB and answers 400 before the keeper or desk is reached.
+    const { keeper } = fakeKeeper();
+    await withServer({ keeper, desk: fakeDesk }, async (url) => {
+      const big = "x".repeat(2000);
+      const res = await fetch(url + "/demo/usdc", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: "0xok", pad: big }) });
       assert.equal(res.status, 400);
-    });
-  });
-
-  it("the default body limit is one megabyte", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper }, async (url) => {
-      // The server answers on the declared length and reads none of the body. The request is
-      // written by hand and sends only its head: a client still writing a megabyte when the
-      // answer comes can have its connection reset, and then sees no answer at all.
-      const port = Number(new URL(url).port);
-      const head = (length: number) =>
-        `POST /stream HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\nX-QN-Nonce: n\r\nX-QN-Timestamp: 1\r\nX-QN-Signature: ${"a".repeat(64)}\r\nContent-Length: ${length}\r\n\r\n`;
-      const status = (length: number) =>
-        new Promise<number>((resolve, reject) => {
-          const socket = connect(port, "127.0.0.1", () => socket.write(head(length)));
-          let text = "";
-          socket.on("data", (c) => {
-            text += c.toString();
-            socket.destroy();
-            resolve(Number(text.split(" ")[1]));
-          });
-          socket.on("error", reject);
-        });
-      assert.equal(await status(1024 * 1024 + 1), 413);
-      assert.equal(calls.length, 0);
-    });
-  });
-
-  it("refuses a signed empty body with 401", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper }, async (url) => {
-      const res = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", "a".repeat(64)), body: "" });
-      assert.equal(res.status, 401);
-      assert.equal(calls.length, 0);
+      assert.deepEqual(await res.json(), { ok: false, reason: "bad-address" });
     });
   });
 
@@ -345,11 +222,10 @@ describe("keeper server", function () {
   it("server.health.node: /health carries the follower's state, or null when the keeper does not read the node", async function () {
     const { keeper } = fakeKeeper();
     await withServer({ keeper }, async (url) => {
-      const h = (await (await fetch(url + "/health")).json()) as { node: unknown; streamBlock: unknown };
+      const h = (await (await fetch(url + "/health")).json()) as { node: unknown };
       assert.equal(h.node, null);
-      assert.equal(h.streamBlock, null);
     });
-    const state = { following: true, reads: 4, lastReadAt: 1_700_000_000_000, readTo: 812, faults: 1 };
+    const state = { reads: 4, lastReadAt: 1_700_000_000_000, readTo: 812, faults: 1 };
     await withServer({ keeper, follower: { state: () => state } }, async (url) => {
       assert.deepEqual(((await (await fetch(url + "/health")).json()) as { node: unknown }).node, state);
     });
@@ -450,66 +326,67 @@ describe("keeper server", function () {
     });
     return { status, answered, write: (t) => socket.write(t), end: () => socket.destroy() };
   };
-  const signedHead = (length: number) =>
-    `POST /stream HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nX-QN-Nonce: n\r\nX-QN-Timestamp: 1\r\nX-QN-Signature: ${"a".repeat(64)}\r\nContent-Length: ${length}\r\n\r\n`;
+  // A POST to /relay, which reads a body (so the shared body machinery runs). /relay caps a body
+  // at 2 KiB and needs a relay set before it reads one.
+  const relayHead = (length: number) =>
+    `POST /relay HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: ${length}\r\n\r\n`;
 
-  it("server.unsigned: a request without the Stream's headers is refused before any of its body is taken", async function () {
+  it("server.refusedEarly: a body route that refuses before reading answers at once, its body never taken", async function () {
+    // Ported from the old server.unsigned: /relay with no relay answers 503 before any body is read.
     const { keeper, calls } = fakeKeeper();
     await withServer({ keeper, bodyDeadlineMs: 60_000 }, async (url) => {
       const port = Number(new URL(url).port);
       // A megabyte is promised and none of it is ever sent. The answer must not wait for it.
       const started = Date.now();
-      const r = open(port, `POST /stream HTTP/1.1\r\nHost: x\r\nContent-Length: 1000000\r\n\r\n`);
-      assert.equal(await r.status, 401);
+      const r = open(port, `POST /relay HTTP/1.1\r\nHost: x\r\nContent-Length: 1000000\r\n\r\n`);
+      assert.equal(await r.status, 503);
       assert.ok(Date.now() - started < 5_000, "answered at once");
       assert.equal(calls.length, 0);
     });
   });
 
-  it("server.declared: a body declared larger than the limit is refused before it is sent", async function () {
+  it("server.declared: a body declared larger than the route's limit is refused before it is sent", async function () {
     const { keeper } = fakeKeeper();
-    await withServer({ keeper, maxBody: 50, bodyDeadlineMs: 60_000 }, async (url) => {
-      const r = open(Number(new URL(url).port), signedHead(51));
-      assert.equal(await r.status, 413);
+    await withServer({ keeper, relay: fakeRelay, bodyDeadlineMs: 60_000 }, async (url) => {
+      const r = open(Number(new URL(url).port), relayHead(2049)); // over /relay's 2 KiB
+      assert.equal(await r.status, 400);
     });
   });
 
   it("server.slow: a body that does not arrive in time is given up on, and the connection closed", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper, bodyDeadlineMs: 150 }, async (url) => {
+    const { keeper } = fakeKeeper();
+    await withServer({ keeper, relay: fakeRelay, bodyDeadlineMs: 150 }, async (url) => {
       const started = Date.now();
-      const r = open(Number(new URL(url).port), signedHead(40));
-      r.write("only part of it");
-      assert.equal(await r.status, 408);
+      const r = open(Number(new URL(url).port), relayHead(40));
+      r.write("only part");
+      assert.equal(await r.status, 400);
       assert.ok(Date.now() - started < 5_000, "given up on at the body's own deadline, not the server's longer one");
-      assert.equal(calls.length, 0);
     });
   });
 
   it("server.held: all bodies being read together are held to one budget, and it is given back", async function () {
-    const { keeper, calls } = fakeKeeper();
-    await withServer({ keeper, maxBody: 1000, maxHeld: 1500, bodyDeadlineMs: 60_000 }, async (url) => {
+    const { keeper } = fakeKeeper();
+    await withServer({ keeper, relay: fakeRelay, maxHeld: 1500, bodyDeadlineMs: 60_000 }, async (url) => {
       const port = Number(new URL(url).port);
       const pause = () => new Promise((r) => setTimeout(r, 100));
-      // Two senders each hold 900 bytes of an unfinished 1000-byte body: under the limit apiece,
+      // Two senders each hold 900 bytes of an unfinished body: under /relay's own limit apiece,
       // over the budget together. The one that crosses it is turned away.
-      const first = open(port, signedHead(1000));
+      const first = open(port, relayHead(1000));
       first.write("x".repeat(900));
       await pause();
-      const second = open(port, signedHead(1000));
+      const second = open(port, relayHead(1000));
       second.write("x".repeat(900));
       assert.equal(await second.status, 503);
       // The first is still within its own limits and is still being read.
       first.end();
       await pause();
-      // Both are gone; what they held is given back, and a real delivery goes through.
-      const res = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", deliveryText)), body: deliveryText });
-      assert.equal(res.status, 200);
-      assert.equal(calls.length, 1);
-      // And again, twice over: had the budget leaked, these 1400 bytes would not fit.
+      // Both are gone; what they held is given back, and a real relay request goes through.
+      const ok = await fetch(url + "/relay", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "1" }) });
+      assert.equal(ok.status, 200);
+      assert.deepEqual(await ok.json(), { ok: true, hash: "0xbeef" });
+      // And again, twice over: had the budget leaked, these padded bodies would not fit.
       for (let i = 0; i < 2; i++) {
-        const big = JSON.stringify({ ...delivery, pad: "y".repeat(700) });
-        const again = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", big)), body: big });
+        const again = await fetch(url + "/relay", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "1", pad: "y".repeat(700) }) });
         assert.equal(again.status, 200);
       }
     });
@@ -517,22 +394,22 @@ describe("keeper server", function () {
 
   it("server.exact: bodies turned away for their size leave the budget exactly where it was", async function () {
     const { keeper } = fakeKeeper();
-    await withServer({ keeper, maxBody: 1000, maxHeld: 2500, bodyDeadlineMs: 60_000 }, async (url) => {
+    await withServer({ keeper, relay: fakeRelay, maxHeld: 2500, bodyDeadlineMs: 60_000 }, async (url) => {
       const port = Number(new URL(url).port);
       const pause = (ms = 100) => new Promise((r) => setTimeout(r, ms));
-      const chunkedHead = signedHead(0).replace("Content-Length: 0", "Transfer-Encoding: chunked");
-      // Thirty bodies that declare no length and run past the limit: each is cut off with 413.
+      const chunkedHead = `POST /relay HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n`;
+      // Thirty bodies that declare no length and run past /relay's 2 KiB limit: each is cut off.
       for (let i = 0; i < 30; i++) {
         const r = open(port, chunkedHead);
-        r.write(`44c\r\n${"x".repeat(1100)}\r\n`);
-        assert.equal(await r.status, 413);
+        r.write(`c00\r\n${"x".repeat(3072)}\r\n`);
+        assert.equal(await r.status, 400);
       }
       // Had each of those given back more than it took, the budget would now be far below zero
       // and three senders holding 900 bytes apiece (2700, over the 2500 budget) would all fit.
-      const holders = [open(port, signedHead(1000)), open(port, signedHead(1000))];
+      const holders = [open(port, relayHead(1000)), open(port, relayHead(1000))];
       for (const h of holders) h.write("x".repeat(900));
       await pause();
-      const third = open(port, signedHead(1000));
+      const third = open(port, relayHead(1000));
       third.write("x".repeat(900));
       const status = await Promise.race([third.status, pause(3_000).then(() => -1)]);
       assert.equal(status, 503);
@@ -542,20 +419,20 @@ describe("keeper server", function () {
 
   it("server.dropped: a connection that goes away part-way through its body gives back what it held", async function () {
     const { keeper } = fakeKeeper();
-    await withServer({ keeper, maxBody: 4000, maxHeld: 5000, bodyDeadlineMs: 60_000 }, async (url) => {
+    await withServer({ keeper, relay: fakeRelay, maxHeld: 2500, bodyDeadlineMs: 60_000 }, async (url) => {
       const port = Number(new URL(url).port);
       const pause = (ms = 150) => new Promise((r) => setTimeout(r, ms));
-      const gone = open(port, signedHead(4000));
-      gone.write("x".repeat(3000));
+      const gone = open(port, relayHead(2000));
+      gone.write("x".repeat(1500));
       await pause();
-      gone.end(); // the socket is destroyed with 1000 bytes still owed
+      gone.end(); // the socket is destroyed with 500 bytes still owed
       await pause();
-      // 3000 bytes fit again. Had the first 3000 still been counted, this sender would be turned away.
-      const next = open(port, signedHead(4000));
-      next.write("x".repeat(3000));
+      // 1500 bytes fit again. Had the first 1500 still been counted, this sender would be turned away.
+      const next = open(port, relayHead(2000));
+      next.write("x".repeat(1500));
       await pause();
-      next.write("x".repeat(1000));
-      assert.equal(await Promise.race([next.answered, pause(3_000).then(() => -1)]), 401); // read in full; its signature is not the Stream's
+      next.write("x".repeat(500));
+      assert.equal(await Promise.race([next.answered, pause(3_000).then(() => -1)]), 400); // read in full; its body is not JSON
       next.end();
     });
   });
@@ -586,12 +463,10 @@ describe("keeper server", function () {
     });
   });
 
-  it("server.notTheSender: a delivery that could not be stored, and a desk that could not answer, are this server's fault (503)", async function () {
-    const { keeper } = fakeKeeper({
-      deliver() {
-        throw new Error("disk full");
-      },
-    });
+  it("server.notTheSender: a desk that could not answer is this server's fault (503)", async function () {
+    // The store-fault half once tested keeper.deliver over a route that no longer exists, so only
+    // the desk-fault half remains.
+    const { keeper } = fakeKeeper();
     const downDesk: Desk = {
       address: DESK_ADDR,
       giveUsdc: async () => {
@@ -602,8 +477,6 @@ describe("keeper server", function () {
       },
     };
     await withServer({ keeper, desk: downDesk }, async (url) => {
-      const res = await fetch(url + "/stream", { method: "POST", headers: streamHeaders("n", "1", sign("n", "1", deliveryText)), body: deliveryText });
-      assert.equal(res.status, 503);
       const usdc = await fetch(url + "/demo/usdc", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: "0xok" }) });
       assert.equal(usdc.status, 503);
       assert.deepEqual(await usdc.json(), { ok: false, reason: "busy" });
@@ -614,7 +487,7 @@ describe("keeper server", function () {
   });
 
   it("server.timeouts: no request may stay open for minutes, and connections are counted", async function () {
-    const server = createServer({ keeper: fakeKeeper().keeper, secret });
+    const server = createServer({ keeper: fakeKeeper().keeper });
     assert.equal(server.headersTimeout, 15_000);
     assert.equal(server.requestTimeout, 30_000);
     assert.equal(server.maxConnections, 256);

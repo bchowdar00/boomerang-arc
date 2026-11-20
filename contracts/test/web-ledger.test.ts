@@ -22,7 +22,7 @@ type W = Awaited<ReturnType<typeof setup>>;
 
 const toHex = (v: bigint | number): `0x${string}` => `0x${BigInt(v).toString(16)}`;
 
-/** One delivery per block that holds a Boomerang log, shaped like streams/filter.js, then a clock tick. */
+/** One delivery per block that holds a Boomerang log, in the keeper's delivery shape, then a clock tick. */
 async function deliveries(w: W): Promise<Delivery[]> {
   const logs = await w.publicClient.getLogs({ address: w.boomerang.address, fromBlock: 0n });
   const blocks = [...new Set(logs.map((lg) => lg.blockNumber!))].sort((a, b) => (a < b ? -1 : 1));

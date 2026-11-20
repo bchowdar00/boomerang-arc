@@ -125,8 +125,8 @@ describe("the app's one-block read", function () {
       ],
     };
     const health = readHealth({
-      lastSeq: ledger.lastSeq.toString(), missing: null, pending: 0, repeats: 0, lastBlock: 0, lastTime: "0", lastDeliveryAt: null, lastBeatBlock: null,
-      kvError: null, deliveries: 0, sent: 0, failedSends: 0, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
+      lastSeq: ledger.lastSeq.toString(), missing: null, pending: 0, repeats: 0, lastBlock: 0, lastTime: "0",
+      sent: 0, failedSends: 0, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
     });
 
     const world = await readWorld({ client: w.publicClient, where, account: alice, keeper: async (): Promise<KeeperAnswer> => ({ up: true, ledger, health }) });
@@ -139,7 +139,7 @@ describe("the app's one-block read", function () {
       custody: world.custody, campaigns: world.campaigns, count: world.count,
       ledger, health, backerChecks: world.backerChecks, backerTotal: world.backerTotal,
       where: { ...where, router: w.boomerang.address },
-      pace: { state: "prompt", by: "stream" },
+      pace: { state: "prompt" },
     });
     assert.equal(page.second.state, "differs");
     assert.ok(
@@ -185,8 +185,8 @@ describe("the app's one-block read", function () {
     }
     const ledger: LedgerView = { lastSeq: await w.boomerang.read.eventCount(), totalOwed: await w.boomerang.read.totalOwed(), missing: null, feed: [], campaigns };
     const health = readHealth({
-      lastSeq: ledger.lastSeq.toString(), missing: null, pending: 0, repeats: 0, lastBlock: 0, lastTime: "0", lastDeliveryAt: null, lastBeatBlock: null,
-      kvError: null, deliveries: 0, sent: 0, failedSends: 0, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
+      lastSeq: ledger.lastSeq.toString(), missing: null, pending: 0, repeats: 0, lastBlock: 0, lastTime: "0",
+      sent: 0, failedSends: 0, rejected: 0, gaveUp: [], lastErrors: [], settled: true, desk: null,
     });
     return async () => ({ up: true, ledger, health });
   }
